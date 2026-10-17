@@ -23,7 +23,8 @@
                 </div>
             </div>
 
-            <div class="flex items-center space-x-2 sm:space-x-3">
+            <!-- Contenedor Dinámico de Autenticación / Acceso Admin -->
+            <div id="authContainer" class="flex items-center space-x-2 sm:space-x-3">
                 <button onclick="openModal('loginModal')" class="text-gray-700 hover:text-indigo-600 text-xs sm:text-sm font-semibold px-3 py-2 transition">
                     Entrar
                 </button>
@@ -39,6 +40,21 @@
             </div>
         </div>
     </header>
+
+    <!-- Barra de Herramientas de Administrador (Oculta por defecto, aparece al iniciar sesión como Admin) -->
+    <div id="adminToolbar" class="hidden bg-slate-900 text-white py-2 px-4 shadow-inner">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between text-xs sm:text-sm">
+            <div class="flex items-center space-x-3">
+                <span class="bg-red-600 text-white px-2 py-0.5 rounded font-bold uppercase text-xs"><i class="fas fa-shield-alt mr-1"></i> Modo Admin</span>
+                <span id="adminWelcomeText" class="text-gray-300 font-medium">Panel de Control Activo</span>
+            </div>
+            <div class="flex items-center space-x-3 mt-1 sm:mt-0">
+                <button onclick="alert('Panel de Moderación de Subastas y Reportes')" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded transition"><i class="fas fa-gavel mr-1 text-indigo-400"></i> Moderar Subastas</button>
+                <button onclick="alert('Lista de Mini Admins y Soporte Activos: soporte_lucia92, mod_carlos77, admin_valeria4, soporte_mateo88, mod_sofia21')" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded transition"><i class="fas fa-users-cog mr-1 text-yellow-400"></i> Gestionar Soporte</button>
+                <button onclick="logout()" class="text-red-400 hover:text-red-300 font-semibold px-2 py-1"><i class="fas fa-sign-out-alt mr-1"></i> Salir</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Categorías -->
     <nav class="bg-white border-b border-gray-100 py-3">
@@ -217,7 +233,7 @@
         </div>
     </div>
 
-    <!-- Lógica de Autenticación y Encriptación (SHA-256) -->
+    <!-- Lógica de Autenticación y Control Jerárquico de Administradores -->
     <script>
         const secureCredentials = {
             "yefermc": "22453e9f4514088a29e20a02a832e8d90479701726a41f6ac0c45155f4582f3a", // Admin Jefe
@@ -239,31 +255,50 @@
             const user = document.getElementById('loginUser').value.trim();
             const pass = document.getElementById('loginPass').value;
 
+            // Verificación secreta de administradores
             if (secureCredentials[user]) {
                 const hashedInput = await hashPassword(pass);
                 if (hashedInput === secureCredentials[user]) {
                     closeModal('loginModal');
+                    // Activar interfaz de Administrador / Moderador
+                    document.getElementById('adminToolbar').classList.remove('hidden');
                     if (user === 'yefermc') {
-                        alert('¡Bienvenido Administrador Jefe!');
+                        document.getElementById('adminWelcomeText').innerText = 'Bienvenido Administrador Jefe (yefermc)';
+                        alert('¡Bienvenido Administrador Jefe! Acceso total concedido.');
                     } else {
+                        document.getElementById('adminWelcomeText').innerText = 'Bienvenido Soporte: ' + user;
                         alert('¡Bienvenido al equipo de soporte (' + user + ')!');
                     }
                     return;
                 }
             }
 
+            // Inicio de sesión normal para usuarios comunes
             if (user && pass) {
-                alert('¡Inicio de sesión exitoso! Bienvenido a Bidora.');
                 closeModal('loginModal');
+                // Cambiar barra superior para usuario autenticado común
+                document.getElementById('authContainer').innerHTML = `
+                    <span class="text-xs sm:text-sm font-semibold text-gray-700 mr-2"><i class="fas fa-user-circle text-indigo-600 mr-1"></i> Hola, ${user}</span>
+                    <button onclick="logout()" class="text-red-500 hover:text-red-700 text-xs font-semibold px-2 py-1"><i class="fas fa-sign-out-alt"></i> Salir</button>
+                `;
+                alert('¡Inicio de sesión exitoso! Bienvenido a Bidora.');
             } else {
                 alert('Por favor completa todos los campos.');
             }
         }
 
         function socialLogin(provider) {
-            alert('Conectando con ' + provider + '... ¡Acceso concedido con éxito!');
             closeModal('loginModal');
             closeModal('registerModal');
+            document.getElementById('authContainer').innerHTML = `
+                <span class="text-xs sm:text-sm font-semibold text-gray-700 mr-2"><i class="fab fa-${provider.toLowerCase()} text-indigo-600 mr-1"></i> Hola, Usuario (${provider})</span>
+                <button onclick="logout()" class="text-red-500 hover:text-red-700 text-xs font-semibold px-2 py-1"><i class="fas fa-sign-out-alt"></i> Salir</button>
+            `;
+            alert('Conectando con ' + provider + '... ¡Acceso concedido con éxito!');
+        }
+
+        function logout() {
+            location.reload();
         }
 
         function toggleReportMenu(btn) {
