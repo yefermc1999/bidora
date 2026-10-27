@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Completa de Bidora -->
+    <!-- Firebase SDK y Lógica Completa Definitiva -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -245,7 +245,6 @@
             } catch (e) { alert("Error al verificar."); }
         };
 
-        // Función optimizada para capturar todos los códigos pendientes sin fallar
         window.getPendingCodesFromCloud = async function(type) {
             try {
                 const snap = await getDocs(collection(db, "usuarios"));
@@ -597,7 +596,7 @@
         </div>
     </div>
 
-    <!-- Modal Verificación (Limpio para el usuario, sin mostrar códigos en pantalla) -->
+    <!-- Modal Verificación -->
     <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verificación</h3>
