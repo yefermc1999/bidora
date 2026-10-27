@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Completa con Jerarquías, Contador de Admins y Borrado de Verificaciones -->
+    <!-- Firebase SDK y Lógica Completa con Normalización de Nombres y Borrado Seguro -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -72,10 +72,10 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
-        // Registro de Usuarios con Jerarquías
+        // Registro de Usuarios unificando minúsculas obligatorias
         window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
             try {
-                const username = usernameInput.trim().toLowerCase();
+                const username = usernameInput.trim().toLowerCase(); // Fuerza minúsculas para evitar duplicados por mayúsculas
                 const qUser = query(collection(db, "usuarios"), where("username", "==", username));
                 if (!(await getDocs(qUser)).empty) return { errorField: 'username', error: "Este usuario ya está siendo usado" };
                 
@@ -161,7 +161,6 @@
             } catch (e) { return null; }
         };
 
-        // Jerarquía y validación para evitar ascender por encima del rango propio
         const jerarquiaNiveles = {
             '👑 Presidente / Fundador Supremo': 10,
             '💼 Director de Operaciones (COO)': 9,
@@ -180,7 +179,6 @@
                 const activeUser = localStorage.getItem('bidora_active_user') || '';
                 const myRole = localStorage.getItem('bidora_role') || '👤 Usuario Estándar';
                 
-                // Si no eres yefermc, validamos que no asignes un rango superior o igual al tuyo
                 if (activeUser !== 'yefermc') {
                     const myLevel = jerarquiaNiveles[myRole] || 1;
                     const targetLevel = jerarquiaNiveles[newRole] || 1;
@@ -207,12 +205,17 @@
             } catch(e) { return []; }
         };
 
+        // Borrado seguro corregido para evitar errores
         window.deleteUserRegistration = async function(userId, type) {
             try {
+                if(!userId) { alert("ID de usuario inválido."); return; }
                 await deleteDoc(doc(db, "usuarios", userId));
                 alert("¡Registro de verificación eliminado con éxito!");
                 openAdminVerificationPanel(type);
-            } catch (e) { alert("Error al intentar eliminar el registro."); }
+            } catch (e) {
+                console.error("Error al eliminar:", e);
+                alert("Error al intentar eliminar el registro de Firestore.");
+            }
         };
 
         window.markAsVerifiedByAdmin = async function(userId, type) {
@@ -242,7 +245,6 @@
             } catch (e) { return []; }
         };
 
-        // Recuperación de Contraseña
         window.requestPasswordResetCode = async function(usernameInput) {
             try {
                 const username = usernameInput.trim().toLowerCase();
@@ -294,7 +296,6 @@
             } catch(e) { return []; }
         };
 
-        // Sugerencias
         window.sendUserSuggestion = async function(suggestionText) {
             try {
                 const user = localStorage.getItem('bidora_active_user') || 'Anónimo';
@@ -318,7 +319,6 @@
             try { await deleteDoc(doc(db, "sugerencias", id)); openAdminSuggestionsModal(); } catch(e) {}
         };
 
-        // Chat de Staff con Contador de Admins Conectados
         window.getStaffChatMessages = async function() {
             try {
                 const snap = await getDocs(query(collection(db, "staff_chat"), orderBy("createdAt", "asc")));
@@ -347,7 +347,6 @@
             } catch(e) { return 1; }
         };
 
-        // Chat Privado con Soporte
         window.startPrivateSupportChat = async function() {
             try {
                 const user = localStorage.getItem('bidora_active_user') || 'Invitado';
@@ -359,7 +358,6 @@
             } catch(e) { return null; }
         };
 
-        // Estadísticas y Jerarquías en Perfil
         window.getUserPublicStats = async function(username) {
             try {
                 const qAuct = await getDocs(collection(db, "subastas"));
@@ -374,14 +372,14 @@
                     }
                 });
 
-                const qUser = query(collection(db, "usuarios"), where("username", "==", username));
+                const qUser = query(collection(db, "usuarios"), where("username", "==", username.toLowerCase()));
                 const snapUser = await getDocs(qUser);
                 let isFounder = false, role = '👤 Usuario Estándar';
                 if(!snapUser.empty) { 
                     isFounder = snapUser.docs[0].data().isFounder; 
                     role = snapUser.docs[0].data().role || '👤 Usuario Estándar'; 
                 }
-                if (username === 'yefermc') { isFounder = true; role = '👑 Presidente / Fundador Supremo'; }
+                if (username.toLowerCase() === 'yefermc') { isFounder = true; role = '👑 Presidente / Fundador Supremo'; }
                 return { created, won, isFounder, role, history };
             } catch(e) { return { created: 0, won: 0, isFounder: false, role: '👤 Usuario Estándar', history: [] }; }
         };
@@ -433,7 +431,7 @@
         <div id="auctionGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </main>
 
-    <!-- Modal Perfil con Rangos Ampliados y Placa Fundador -->
+    <!-- Modal Perfil -->
     <div id="userProfileModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'userProfileModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-center text-gray-800 max-h-[90vh] overflow-y-auto">
             <div class="w-20 h-20 bg-indigo-100 text-indigo-600 text-3xl font-bold rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner" id="profileAvatarLetter">U</div>
@@ -457,7 +455,7 @@
         </div>
     </div>
 
-    <!-- Modal Admin: Gestión de Staff Ampliada -->
+    <!-- Modal Admin: Gestión de Staff -->
     <div id="adminStaffModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminStaffModal')">
         <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl text-gray-800">
             <h3 class="text-base font-bold text-gray-900 mb-1"><i class="fas fa-user-shield text-purple-600 mr-2"></i>Gestión de Staff y Trabajadores</h3>
@@ -537,7 +535,7 @@
         </div>
     </div>
 
-    <!-- Modal Chat de Staff con Contador de Admins -->
+    <!-- Modal Chat de Staff -->
     <div id="staffChatModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'staffChatModal')">
         <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl text-gray-800 flex flex-col h-[420px]">
             <div class="flex justify-between items-center mb-2 border-b pb-2">
@@ -689,7 +687,6 @@
             }
         }
 
-        // Panel de Gestión de Staff con Jerarquía Amplia
         async function openAdminStaffManagement() {
             openModal('adminStaffModal');
             const list = document.getElementById('adminStaffList');
