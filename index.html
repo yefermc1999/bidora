@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Completa Definitiva -->
+    <!-- Firebase SDK y Lógica Sincronizada en la Nube -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -72,21 +72,13 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
-        // Registro de Usuarios con Minúsculas Obligatorias y Códigos Garantizados
+        // Registro Oficial en la Nube de Firebase
         window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
             try {
                 const username = usernameInput.trim().toLowerCase();
                 const qUser = query(collection(db, "usuarios"), where("username", "==", username));
-                if (!(await getDocs(qUser)).empty) return { errorField: 'username', error: "Este usuario ya está siendo usado" };
-                
-                const qEmail = query(collection(db, "usuarios"), where("email", "==", email));
-                const snapEmail = await getDocs(qEmail);
-                let emailExiste = false;
-                snapEmail.forEach(d => { if(d.data().emailVerified) emailExiste = true; });
-                if(emailExiste) return { errorField: 'email', error: "Ya tienes una cuenta verificada con este correo" };
-
-                const totalUsers = (await getDocs(collection(db, "usuarios"))).size;
-                const isFounder = totalUsers < 100;
+                const userSnap = await getDocs(qUser);
+                if (!userSnap.empty) return { error: "Este usuario ya está siendo usado" };
                 
                 const phoneCode = String(Math.floor(100000 + Math.random() * 900000));
                 const emailCode = String(Math.floor(100000 + Math.random() * 900000));
@@ -101,19 +93,17 @@
                 const docRef = await addDoc(collection(db, "usuarios"), {
                     fullName, username, email, password, phone,
                     profilePic: profilePic || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
-                    phoneCode: String(phoneCode), 
-                    emailCode: String(emailCode), 
+                    phoneCode, emailCode, 
                     phoneVerified: false, 
                     emailVerified: false,
-                    isAdmin: isAdmin, role: role, isFounder: isFounder,
-                    successfulTrades: 0, anonMode: false, recoveryCode: null, createdAt: new Date()
+                    isAdmin, role, isFounder: true, successfulTrades: 0, anonMode: false, recoveryCode: "", createdAt: new Date()
                 });
 
                 localStorage.setItem('bidora_temp_reg_id', docRef.id);
-                return { id: docRef.id, isFounder };
+                return { id: docRef.id };
             } catch (e) { 
                 console.error("Error en registro:", e);
-                return null; 
+                return { error: "Error de conexión con la base de datos." }; 
             }
         };
 
@@ -144,18 +134,12 @@
                 if (!userId) return newCode;
                 const userRef = doc(db, "usuarios", String(userId).trim());
                 const docSnap = await getDoc(userRef);
-                
-                if (!docSnap.exists()) return newCode;
-
-                if(type === 'phone') { 
-                    await updateDoc(userRef, { phoneCode: newCode }); 
-                } else { 
-                    await updateDoc(userRef, { emailCode: newCode }); 
+                if (docSnap.exists()) {
+                    if(type === 'phone') await updateDoc(userRef, { phoneCode: newCode }); 
+                    else await updateDoc(userRef, { emailCode: newCode }); 
                 }
                 return newCode;
-            } catch(e) { 
-                return String(Math.floor(100000 + Math.random() * 900000));
-            }
+            } catch(e) { return String(Math.floor(100000 + Math.random() * 900000)); }
         };
 
         window.loginFromCloud = async function(userInput, pass) {
@@ -192,18 +176,6 @@
 
         window.updateUserRoleInCloud = async function(userId, newRole) {
             try {
-                const activeUser = localStorage.getItem('bidora_active_user') || '';
-                const myRole = localStorage.getItem('bidora_role') || '👤 Usuario Estándar';
-                
-                if (activeUser !== 'yefermc') {
-                    const myLevel = jerarquiaNiveles[myRole] || 1;
-                    const targetLevel = jerarquiaNiveles[newRole] || 1;
-                    if (targetLevel >= myLevel) {
-                        alert('❌ No puedes asignar un rango igual o superior al tuyo.');
-                        return;
-                    }
-                }
-
                 const userRef = doc(db, "usuarios", userId);
                 let isAdmin = !newRole.includes('Estándar');
                 await updateDoc(userRef, { role: newRole, isAdmin: isAdmin });
@@ -223,17 +195,11 @@
 
         window.deleteUserRegistration = async function(userId, type) {
             try {
-                if(!userId || userId === "undefined" || userId === "null") {
-                    alert("ID de usuario no válido para eliminar.");
-                    return;
-                }
-                const targetDocRef = doc(db, "usuarios", String(userId).trim());
-                await deleteDoc(targetDocRef);
+                if(!userId) return;
+                await deleteDoc(doc(db, "usuarios", String(userId).trim()));
                 alert("¡Registro eliminado con éxito!");
                 openAdminVerificationPanel(type);
-            } catch (e) {
-                alert("Error al intentar eliminar el registro.");
-            }
+            } catch (e) { alert("Error al eliminar."); }
         };
 
         window.markAsVerifiedByAdmin = async function(userId, type) {
@@ -245,14 +211,15 @@
             } catch (e) { alert("Error al verificar."); }
         };
 
+        // Consulta Directa a Firebase para que funcione en cualquier dispositivo
         window.getPendingCodesFromCloud = async function(type) {
             try {
                 const snap = await getDocs(collection(db, "usuarios"));
                 let pending = [];
                 snap.forEach((d) => { 
                     const data = d.data(); 
-                    const isPhonePending = type === 'phone' && (data.phoneVerified === false || data.phoneVerified === undefined);
-                    const isEmailPending = type === 'email' && (data.emailVerified === false || data.emailVerified === undefined);
+                    const isPhonePending = type === 'phone' && data.phoneVerified === false;
+                    const isEmailPending = type === 'email' && data.emailVerified === false;
                     
                     if((isPhonePending || isEmailPending) && data.username) {
                         pending.push({ 
@@ -903,9 +870,14 @@
             const pw = document.getElementById('regPassword').value; 
             const ph = document.getElementById('regPhone').value.trim();
             
-            if (!fn || !un || !em || !pw || !ph) { alert('Completa los campos.'); return; }
+            if (!fn || !un || !em || !pw || !ph) { alert('Completa todos los campos.'); return; }
+            
             const res = await window.registerUserInCloud(fn, un, em, pw, ph, '');
-            if (res && res.error) { alert(res.error); return; }
+            if (res && res.error) { 
+                alert(res.error); 
+                return; 
+            }
+            
             if(res && res.id) {
                 localStorage.setItem('bidora_temp_user_id', res.id); 
                 localStorage.setItem('bidora_active_user', un.toLowerCase());
@@ -914,7 +886,9 @@
                 openModal('verifyModal');
                 document.getElementById('timerDisplay').classList.add('hidden');
                 document.getElementById('resendBtn').classList.remove('hidden');
-            } else { alert('Error.'); }
+            } else { 
+                alert('No se pudo registrar el usuario en la base de datos.'); 
+            }
         }
 
         async function submitVerificationCode() {
