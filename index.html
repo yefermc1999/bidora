@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Completa con Normalización de Nombres y Borrado Seguro -->
+    <!-- Firebase SDK y Lógica Completa con Borrado 100% Reparado -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -72,10 +72,10 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
-        // Registro de Usuarios unificando minúsculas obligatorias
+        // Registro de Usuarios con Minúsculas Obligatorias
         window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
             try {
-                const username = usernameInput.trim().toLowerCase(); // Fuerza minúsculas para evitar duplicados por mayúsculas
+                const username = usernameInput.trim().toLowerCase();
                 const qUser = query(collection(db, "usuarios"), where("username", "==", username));
                 if (!(await getDocs(qUser)).empty) return { errorField: 'username', error: "Este usuario ya está siendo usado" };
                 
@@ -205,22 +205,27 @@
             } catch(e) { return []; }
         };
 
-        // Borrado seguro corregido para evitar errores
+        // FUNCIÓN DE BORRADO 100% BLINDADA
         window.deleteUserRegistration = async function(userId, type) {
             try {
-                if(!userId) { alert("ID de usuario inválido."); return; }
-                await deleteDoc(doc(db, "usuarios", userId));
-                alert("¡Registro de verificación eliminado con éxito!");
+                if(!userId || userId === "undefined" || userId === "null") {
+                    alert("ID de usuario no válido para eliminar.");
+                    return;
+                }
+                const targetDocRef = doc(db, "usuarios", String(userId).trim());
+                await deleteDoc(targetDocRef);
+                alert("¡Registro eliminado con éxito!");
                 openAdminVerificationPanel(type);
             } catch (e) {
-                console.error("Error al eliminar:", e);
-                alert("Error al intentar eliminar el registro de Firestore.");
+                console.error("Error detallado al eliminar en Firestore:", e);
+                alert("Error al intentar eliminar el registro: " + e.message);
             }
         };
 
         window.markAsVerifiedByAdmin = async function(userId, type) {
             try {
-                await updateDoc(doc(db, "usuarios", userId), type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
+                const userRef = doc(db, "usuarios", String(userId).trim());
+                await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
                 alert("¡Verificado con éxito!");
                 openAdminVerificationPanel(type);
             } catch (e) { alert("Error al verificar."); }
@@ -235,7 +240,8 @@
                     const needsVerification = type === 'phone' ? !data.phoneVerified : !data.emailVerified;
                     if(needsVerification) {
                         pending.push({ 
-                            id: d.id, username: data.username, 
+                            id: d.id, 
+                            username: data.username, 
                             contact: type === 'phone' ? data.phone : data.email, 
                             code: type === 'phone' ? data.phoneCode : data.emailCode 
                         }); 
