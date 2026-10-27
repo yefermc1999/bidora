@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Completa Definitiva -->
+    <!-- Firebase SDK y Lógica Completa con Temporizador Inteligente en Reenvío -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -132,7 +132,6 @@
             } catch (e) { return false; }
         };
 
-        // Función de reenvío blindada para evitar errores
         window.resendVerificationCodeInCloud = async function(userId, type) {
             try {
                 const newCode = String(Math.floor(100000 + Math.random() * 900000));
@@ -593,15 +592,16 @@
         </div>
     </div>
 
-    <!-- Modal Verificación con Temporizador -->
+    <!-- Modal Verificación (Sin esperas iniciales, temporizador solo al pedir reenvío) -->
     <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verificación</h3>
-            <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-2">
+            <p class="text-xs text-gray-500 mb-4">Te enviaremos el código por WhatsApp o SMS. Ingrésalo aquí para activar tu cuenta.</p>
+            <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
             <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Verificar</button>
             <div class="text-xs text-gray-500">
-                <span id="timerDisplay">Reenviar código en <strong id="countdown">60</strong>s</span>
-                <button id="resendBtn" onclick="handleResendCode()" class="hidden text-indigo-600 font-bold hover:underline">Reenviar nuevo código</button>
+                <span id="timerDisplay" class="hidden">Reenviar código en <strong id="countdown">60</strong>s</span>
+                <button id="resendBtn" onclick="handleResendCode()" class="text-indigo-600 font-bold hover:underline">Reenviar nuevo código</button>
             </div>
         </div>
     </div>
@@ -610,7 +610,7 @@
     <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <h3 id="adminModalTitle" class="text-base font-bold mb-2">Códigos</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Copia el mensaje y mándaselo al usuario. Luego puedes aprobarlo o borrar el registro.</p>
+            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Copia el mensaje y mándaselo al usuario por WhatsApp o SMS. Luego puedes aprobarlo o borrar el registro.</p>
             <div id="adminVerifList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
             <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
         </div>
@@ -695,8 +695,8 @@
             const userId = localStorage.getItem('bidora_temp_user_id');
             const newCode = await window.resendVerificationCodeInCloud(userId, verificationStep);
             if(newCode) {
-                alert(`¡Nuevo código generado! Tu código es: ${newCode}`);
-                startCountdown();
+                alert(`¡Nuevo código generado para este usuario! Revísalo en tu panel de administrador.`);
+                startCountdown(); // Aquí sí arranca el contador de 60s tras solicitar un nuevo reenvío
             } else {
                 alert('Error al reenviar código.');
             }
@@ -844,12 +844,14 @@
             if (localStorage.getItem('bidora_phone_verified') !== 'true') { 
                 verificationStep = 'phone'; 
                 openModal('verifyModal'); 
-                startCountdown();
+                document.getElementById('timerDisplay').classList.add('hidden');
+                document.getElementById('resendBtn').classList.remove('hidden');
             } 
             else if (localStorage.getItem('bidora_email_verified') !== 'true') { 
                 verificationStep = 'email'; 
                 openModal('verifyModal'); 
-                startCountdown();
+                document.getElementById('timerDisplay').classList.add('hidden');
+                document.getElementById('resendBtn').classList.remove('hidden');
             }
         };
 
@@ -869,7 +871,7 @@
         }
 
         async function handleRegistrationUpload() {
-            const fn = document.getElementById('regFullName').value.trim(), un = document.getElementById('regUsername').value.trim(), 
+            const fn = document.getElementById('regFullName'].value.trim(), un = document.getElementById('regUsername').value.trim(), 
                   em = document.getElementById('regEmail').value.trim(), pw = document.getElementById('regPassword').value, ph = document.getElementById('regPhone').value.trim();
             if (!fn || !un || !em || !pw || !ph) { alert('Completa los campos.'); return; }
             const res = await window.registerUserInCloud(fn, un, em, pw, ph, '');
@@ -877,7 +879,9 @@
             if(res && res.id) {
                 localStorage.setItem('bidora_temp_user_id', res.id); localStorage.setItem('bidora_active_user', un.toLowerCase());
                 closeModal('registerModal'); verificationStep = 'phone'; openModal('verifyModal');
-                startCountdown();
+                // Al registrarse por primera vez, el botón de reenviar aparece limpio y sin temporizador
+                document.getElementById('timerDisplay').classList.add('hidden');
+                document.getElementById('resendBtn').classList.remove('hidden');
             } else { alert('Error.'); }
         }
 
@@ -889,7 +893,8 @@
                 if (verificationStep === 'phone') {
                     localStorage.setItem('bidora_phone_verified', 'true'); verificationStep = 'email';
                     document.getElementById('verifyInputCode').value = ''; alert('¡Teléfono verificado! Ahora verifica tu correo.');
-                    startCountdown();
+                    document.getElementById('timerDisplay').classList.add('hidden');
+                    document.getElementById('resendBtn').classList.remove('hidden');
                 } else {
                     localStorage.setItem('bidora_email_verified', 'true'); closeModal('verifyModal'); alert('¡Cuenta 100% verificada!'); location.reload();
                 }
@@ -1010,7 +1015,7 @@
         }
 
         function handleAuctionPublish() {
-            const t = document.getElementById('newAuctionTitle').value, p = document.getElementById('newAuctionPrice').value;
+            const t = document.getElementById('newAuctionTitle'].value, p = document.getElementById('newAuctionPrice'].value;
             window.saveAuctionToFirebase(t, 'Tecnología', p, '', '', false, '');
         }
 
