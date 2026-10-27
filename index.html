@@ -10,7 +10,7 @@
     <!-- Firebase SDK y Funciones de Nube -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBz5akqL6ij-T9S3kn9r0716Ng7yA8hmc8",
@@ -69,9 +69,28 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
-        // REGISTRO EN LA NUBE (Firestore directo)
-        window.registerUserInCloud = async function(fullName, username, email, password, phone, profilePic) {
+        window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
             try {
+                const username = usernameInput.trim().toLowerCase();
+                const querySnapshot = await getDocs(collection(db, "usuarios"));
+                let usernameExists = false;
+                let emailExists = false;
+                let phoneExists = false;
+                let totalUsers = 0;
+
+                querySnapshot.forEach((docSnap) => {
+                    totalUsers++;
+                    const data = docSnap.data();
+                    if (data.username === username) { usernameExists = true; }
+                    if (data.email === email && data.emailVerified) { emailExists = true; }
+                    if (data.phone === phone && data.phoneVerified) { phoneExists = true; }
+                });
+
+                if (usernameExists) { return { errorField: 'username', error: "Este usuario ya está siendo usado" }; }
+                if (emailExists) { return { errorField: 'email', error: "Ya tienes una cuenta con este correo" }; }
+                if (phoneExists) { return { errorField: 'phone', error: "Ya tienes una cuenta con este teléfono" }; }
+
+                const isFounder = totalUsers < 100;
                 const phoneCode = Math.floor(100000 + Math.random() * 900000).toString();
                 const emailCode = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -79,24 +98,18 @@
                     fullName, username, email, password, phone,
                     profilePic: profilePic || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
                     phoneCode, emailCode,
-                    phoneVerified: false, 
-                    emailVerified: false,
-                    isAdmin: false,
-                    successfulTrades: 0,
-                    anonMode: false,
-                    lastUsernameChange: null,
-                    createdAt: new Date()
+                    phoneVerified: false, emailVerified: false,
+                    isAdmin: false, role: 'Usuario',
+                    isFounder: isFounder,
+                    successfulTrades: 0, anonMode: false,
+                    lastUsernameChange: null, createdAt: new Date()
                 });
 
                 localStorage.setItem('bidora_temp_reg_id', docRef.id);
-                return { id: docRef.id };
-            } catch (e) { 
-                console.error("Error en registro: ", e);
-                return null; 
-            }
+                return { id: docRef.id, isFounder };
+            } catch (e) { return null; }
         };
 
-        // VERIFICAR CÓDIGO EN LA NUBE
         window.verifyCodeInCloud = async function(userId, type, ingresado) {
             try {
                 const querySnapshot = await getDocs(collection(db, "usuarios"));
@@ -111,7 +124,6 @@
                 });
 
                 if (!userData) return false;
-
                 if (type === 'phone' && userData.phoneCode === ingresado) {
                     await updateDoc(targetDocRef, { phoneVerified: true });
                     return true;
@@ -121,13 +133,9 @@
                     return true;
                 }
                 return false;
-            } catch (e) {
-                console.error("Error verificando código: ", e);
-                return false;
-            }
+            } catch (e) { return false; }
         };
 
-        // OBTENER TODOS LOS CÓDIGOS PENDIENTES DESDE FIRESTORE
         window.getPendingCodesFromCloud = async function(type) {
             try {
                 const querySnapshot = await getDocs(collection(db, "usuarios"));
@@ -135,29 +143,165 @@
                 querySnapshot.forEach((docSnap) => {
                     const data = docSnap.data();
                     if (type === 'phone' && !data.phoneVerified) {
-                        pendingList.push({ user: data.username, phone: data.phone, code: data.phoneCode });
+                        pendingList.push({ id: docSnap.id, user: data.username, phone: data.phone, code: data.phoneCode });
                     }
                     if (type === 'email' && !data.emailVerified) {
-                        pendingList.push({ user: data.username, email: data.email, code: data.emailCode });
+                        pendingList.push({ id: docSnap.id, user: data.username, email: data.email, code: data.emailCode });
                     }
                 });
                 return pendingList;
-            } catch (e) {
-                console.error("Error obteniendo pendientes: ", e);
-                return [];
-            }
+            } catch (e) { return []; }
         };
 
-        window.loginFromCloud = async function(user, pass) {
+        window.getAllUsersForAdmin = async function() {
+            try {
+                const querySnapshot = await getDocs(collection(db, "usuarios"));
+                let verifiedActive = [];
+                let disconnectedPending = [];
+
+                querySnapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    const info = { id: docSnap.id, username: data.username, role: data.role || 'Usuario', founder: data.isFounder, verified: data.phoneVerified && data.emailVerified };
+                    if (info.verified) { verifiedActive.push(info); }
+                    else { disconnectedPending.push(info); }
+                });
+                return { verifiedActive, disconnectedPending };
+            } catch (e) { return { verifiedActive: [], disconnectedPending: [] }; }
+        };
+
+        window.updateUserRoleAndPowers = async function(userId, newRole, powers) {
+            try {
+                if (newRole === 'Presidente') {
+                    const querySnapshot = await getDocs(collection(db, "usuarios"));
+                    let presidentExists = false;
+                    querySnapshot.forEach((docSnap) => {
+                        if (docSnap.data().role === 'Presidente' && docSnap.id !== userId) { presidentExists = true; }
+                    });
+                    if (presidentExists) { alert('⚠️ Ya existe un usuario con el rango de Presidente.'); return; }
+                }
+
+                const userRef = doc(db, "usuarios", userId);
+                await updateDoc(userRef, { role: newRole, powers: powers, isAdmin: newRole !== 'Usuario' });
+                alert(`¡Rango asignado con éxito a "${newRole}"!`);
+            } catch(e) { alert("Error al actualizar permisos."); }
+        };
+
+        // Soporte (Ayuda y Sugerencias)
+        window.sendSupportTicket = async function(type, message) {
+            try {
+                const user = localStorage.getItem('bidora_active_user') || 'Invitado';
+                await addDoc(collection(db, "soporte_sugerencias"), {
+                    type, message, user, status: 'Abierto', createdAt: new Date()
+                });
+                alert(`¡Tu ${type === 'Ayuda' ? 'mensaje de ayuda' : 'sugerencia'} ha sido enviado al equipo con éxito!`);
+                closeModal('supportModal');
+            } catch(e) { alert("Error al enviar."); }
+        };
+
+        window.getSupportTickets = async function(type) {
+            try {
+                const querySnapshot = await getDocs(collection(db, "soporte_sugerencias"));
+                let list = [];
+                querySnapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    if (data.type === type) {
+                        list.push({ id: docSnap.id, ...data });
+                    }
+                });
+                return list;
+            } catch(e) { return []; }
+        };
+
+        window.deleteSupportTicket = async function(ticketId) {
+            try {
+                await deleteDoc(doc(db, "soporte_sugerencias", ticketId));
+            } catch(e) { console.error("Error al borrar ticket", e); }
+        };
+
+        // Chat Privado Admin-Usuario
+        window.sendPrivateSupportMessage = async function(ticketId, sender, message) {
+            try {
+                await addDoc(collection(db, "chat_soporte_mensajes"), {
+                    ticketId, sender, message, createdAt: new Date()
+                });
+            } catch(e) { console.error("Error enviando mensaje privado", e); }
+        };
+
+        window.getPrivateSupportMessages = async function(ticketId) {
+            try {
+                const querySnapshot = await getDocs(collection(db, "chat_soporte_mensajes"));
+                let msgs = [];
+                querySnapshot.forEach((docSnap) => {
+                    const d = docSnap.data();
+                    if (d.ticketId === ticketId) { msgs.push(d); }
+                });
+                msgs.sort((a, b) => a.createdAt?.toMillis() - b.createdAt?.toMillis());
+                return msgs;
+            } catch(e) { return []; }
+        };
+
+        window.closeSupportTicketByAdmin = async function(ticketId) {
+            try {
+                const ticketRef = doc(db, "soporte_sugerencias", ticketId);
+                await updateDoc(ticketRef, { status: 'Cerrado' });
+                alert("El administrador ha cerrado esta conversación.");
+            } catch(e) { console.error("Error al cerrar ticket", e); }
+        };
+
+        window.checkUserTicketStatus = async function() {
+            const user = localStorage.getItem('bidora_active_user');
+            if(!user) return;
+            try {
+                const querySnapshot = await getDocs(collection(db, "soporte_sugerencias"));
+                querySnapshot.forEach((docSnap) => {
+                    const d = docSnap.data();
+                    if (d.user === user && d.type === 'Ayuda' && d.status === 'Cerrado') {
+                        document.getElementById('userClosedAlert').classList.remove('hidden');
+                    }
+                });
+            } catch(e) {}
+        };
+
+        window.sendStaffChatMessage = async function(message) {
+            try {
+                await addDoc(collection(db, "staff_chat"), {
+                    sender: localStorage.getItem('bidora_active_user') || 'Admin',
+                    role: localStorage.getItem('bidora_role') || 'Admin',
+                    message, createdAt: new Date()
+                });
+            } catch(e) { console.error("Error enviando mensaje staff", e); }
+        };
+
+        window.getStaffChatMessages = async function() {
+            try {
+                const q = query(collection(db, "staff_chat"), orderBy("createdAt", "asc"));
+                const querySnapshot = await getDocs(q);
+                let messages = [];
+                querySnapshot.forEach((docSnap) => { messages.push(docSnap.data()); });
+                return messages;
+            } catch(e) { return []; }
+        };
+
+        window.markAsVerifiedByAdmin = async function(userId, type) {
+            try {
+                const userRef = doc(db, "usuarios", userId);
+                await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
+                alert("¡El usuario se verificó con éxito!");
+                openAdminVerificationPanel(type);
+            } catch (e) { alert("Error al procesar la verificación."); }
+        };
+
+        window.loginFromCloud = async function(userInput, pass) {
+            const user = userInput.trim().toLowerCase();
             if (user === 'yefermc' && pass === 'Raperodelbien1@') {
-                return { username: 'yefermc', phoneVerified: true, emailVerified: true, isAdmin: true, isSuperAdmin: true, successfulTrades: 50, anonMode: false, lastUsernameChange: null, profilePic: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' };
+                return { username: 'yefermc', phoneVerified: true, emailVerified: true, isAdmin: true, isSuperAdmin: true, role: 'Admin Jefe', isFounder: true, successfulTrades: 50, anonMode: false, lastUsernameChange: null };
             }
             try {
                 const querySnapshot = await getDocs(collection(db, "usuarios"));
                 let foundUser = null;
                 querySnapshot.forEach((docSnap) => {
                     const data = docSnap.data();
-                    if ((data.username === user || data.email === user) && data.password === pass) {
+                    if ((data.username === user || data.email.toLowerCase() === user) && data.password === pass) {
                         foundUser = { id: docSnap.id, ...data };
                     }
                 });
@@ -167,6 +311,7 @@
 
         window.addEventListener('DOMContentLoaded', () => {
             if(typeof window.loadFirebaseAuctions === 'function') window.loadFirebaseAuctions();
+            if(typeof window.checkUserTicketStatus === 'function') window.checkUserTicketStatus();
         });
     </script>
 </head>
@@ -175,14 +320,25 @@
     <!-- Navbar -->
     <header class="bg-white shadow-sm sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <span class="text-2xl font-black text-indigo-600 tracking-wider">BIDORA</span>
+            <div class="flex items-center space-x-4">
+                <span class="text-2xl font-black text-indigo-600 tracking-wider">BIDORA</span>
+                <div class="hidden sm:flex items-center space-x-3 text-xs">
+                    <button onclick="openSupportModal('Ayuda')" class="text-gray-600 hover:text-indigo-600 font-semibold"><i class="fas fa-question-circle mr-1 text-indigo-500"></i> Ayuda</button>
+                    <button onclick="openSupportModal('Sugerencia')" class="text-gray-600 hover:text-indigo-600 font-semibold"><i class="fas fa-lightbulb mr-1 text-amber-500"></i> Sugerencias</button>
+                </div>
+            </div>
             <div id="authContainer" class="flex items-center space-x-2 sm:space-x-3">
                 <!-- Se llena dinámicamente -->
             </div>
         </div>
     </header>
 
-    <!-- Barra de Administrador -->
+    <!-- Alerta si el Admin cerró la conversación de Ayuda al usuario -->
+    <div id="userClosedAlert" class="hidden bg-red-600 text-white text-center py-2 px-4 text-xs font-bold sticky top-16 z-40">
+        ⚠️ El administrador ha cerrado esta conversación.
+    </div>
+
+    <!-- Barra de Administrador / Presidente / Moderadores -->
     <div id="adminToolbar" class="hidden bg-slate-900 text-white py-3 px-4 shadow-lg border-b-2 border-indigo-500">
         <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs sm:text-sm">
             <div class="flex items-center space-x-3">
@@ -192,9 +348,167 @@
             <div class="flex items-center gap-2 flex-wrap">
                 <button onclick="openAdminVerificationPanel('phone')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fab fa-whatsapp mr-1"></i> Códigos Teléfono</button>
                 <button onclick="openAdminVerificationPanel('email')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-envelope mr-1"></i> Códigos Correo</button>
+                <button onclick="openAdminHelpPanel()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-life-ring mr-1"></i> Panel Ayuda (Chats)</button>
+                <button onclick="openAdminSuggestionsPanel()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-lightbulb mr-1"></i> Sugerencias</button>
+                <button onclick="openUsersDropdownModal()" class="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-users mr-1"></i> Lista Usuarios</button>
+                <button onclick="openRanksModal()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-shield-alt mr-1"></i> Rangos</button>
+                <button onclick="openStaffChatModal()" class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-comments mr-1"></i> Chat Staff</button>
                 <button onclick="openModal('settingsModal')" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-cog mr-1"></i> Ajustes</button>
                 <button onclick="openModal('auctionCreateModal')" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-plus-circle mr-1"></i> Publicar</button>
                 <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold">Salir</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Panel de Ayuda (Chats de Problemas de Usuarios con botón X) -->
+    <div id="adminHelpModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminHelpModal')">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl text-gray-800">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-life-ring text-indigo-600 mr-2"></i> Solicitudes de Ayuda (Chats Privados)</h3>
+                <button onclick="closeModal('adminHelpModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="adminHelpTicketsList" class="space-y-2 max-h-60 overflow-y-auto mb-4 text-xs">
+                <p class="text-center text-gray-400">Cargando problemas de usuarios...</p>
+            </div>
+            <div class="flex justify-end">
+                <button onclick="closeModal('adminHelpModal')" class="bg-gray-200 font-bold px-4 py-2 rounded-xl text-xs">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Chat Privado Admin con Usuario Específico -->
+    <div id="privateChatModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'privateChatModal')">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl text-gray-800 flex flex-col h-[450px]">
+            <div class="flex justify-between items-center pb-3 border-b">
+                <h3 id="privateChatTitle" class="text-base font-bold text-gray-900">Chat con Usuario</h3>
+                <div class="flex items-center space-x-2">
+                    <button onclick="closeThisTicket()" class="bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg">Cerrar Conversación (X)</button>
+                    <button onclick="closeModal('privateChatModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div id="privateMessagesContainer" class="flex-1 overflow-y-auto space-y-2 my-3 text-xs pr-2 bg-gray-50 p-3 rounded-xl border">
+                <p class="text-center text-gray-400">Cargando mensajes...</p>
+            </div>
+            <div class="flex gap-2 pt-2 border-t">
+                <input type="text" id="privateChatInput" placeholder="Escribe tu respuesta como administrador..." class="flex-1 border p-2 rounded-xl text-xs" onkeypress="if(event.key === 'Enter') sendPrivateMsg()">
+                <button onclick="sendPrivateMsg()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs">Enviar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Panel de Sugerencias (Solo nombre y sugerencia con botón X) -->
+    <div id="adminSuggestionsModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminSuggestionsModal')">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-lightbulb text-amber-500 mr-2"></i> Sugerencias de Usuarios</h3>
+                <button onclick="closeModal('adminSuggestionsModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="adminSuggestionsList" class="space-y-2 max-h-60 overflow-y-auto mb-4 text-xs">
+                <p class="text-center text-gray-400">Cargando sugerencias...</p>
+            </div>
+            <div class="flex justify-end">
+                <button onclick="closeModal('adminSuggestionsModal')" class="bg-gray-200 font-bold px-4 py-2 rounded-xl text-xs">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Ayuda y Sugerencias (Para los usuarios comunes) -->
+    <div id="supportModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'supportModal')">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="supportModalTitle" class="text-base font-bold text-gray-900">Centro de Soporte</h3>
+                <button onclick="closeModal('supportModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="space-y-3 text-xs mb-4">
+                <textarea id="supportMessage" placeholder="Escribe aquí tu duda o sugerencia..." class="w-full border p-3 rounded-xl resize-none h-28"></textarea>
+            </div>
+            <div class="flex justify-end space-x-2">
+                <button onclick="closeModal('supportModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs">Cancelar</button>
+                <button onclick="submitSupportTicket()" class="bg-indigo-600 text-white font-bold px-4 py-2 rounded-xl text-xs">Enviar Mensaje</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Chat Exclusivo Staff -->
+    <div id="staffChatModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'staffChatModal')">
+        <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl text-gray-800 flex flex-col h-[500px]">
+            <div class="flex justify-between items-center pb-3 border-b">
+                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-comments text-amber-500 mr-2"></i> Chat Exclusivo del Staff</h3>
+                <button onclick="closeModal('staffChatModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="flex flex-1 overflow-hidden mt-3 gap-3">
+                <div class="flex-1 flex flex-col justify-between bg-gray-50 rounded-xl p-3 border">
+                    <div id="staffMessagesContainer" class="flex-1 overflow-y-auto space-y-2 text-xs pr-2">
+                        <p class="text-center text-gray-400">Cargando...</p>
+                    </div>
+                    <div class="flex mt-3 gap-2 pt-2 border-t">
+                        <input type="text" id="staffChatInput" placeholder="Escribe un mensaje..." class="flex-1 border p-2 rounded-xl text-xs" onkeypress="if(event.key === 'Enter') sendStaffMsg()">
+                        <button onclick="sendStaffMsg()" class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-xl text-xs">Enviar</button>
+                    </div>
+                </div>
+                <div class="w-48 bg-gray-50 rounded-xl p-3 border hidden sm:flex flex-col">
+                    <span class="text-xs font-bold text-gray-700 mb-2 border-b pb-1"><i class="fas fa-circle text-green-500 text-[8px] mr-1"></i> Conectados</span>
+                    <div id="onlineStaffList" class="space-y-1 text-xs overflow-y-auto flex-1"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Rangos y Jerarquías -->
+    <div id="ranksModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'ranksModal')">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-shield-alt text-purple-600 mr-2"></i> Gestión de Rangos y Moderadores</h3>
+                <button onclick="closeModal('ranksModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="space-y-3 text-xs mb-4">
+                <div>
+                    <label class="block font-bold mb-1">Seleccionar Usuario Verificado</label>
+                    <select id="rankUserSelect" class="w-full border p-2 rounded-lg bg-white"></select>
+                </div>
+                <div>
+                    <label class="block font-bold mb-1">Asignar Rango / Jerarquía</label>
+                    <select id="rankTitleSelect" class="w-full border p-2 rounded-lg bg-white">
+                        <option value="Presidente">Presidente (Rango Exclusivo - 1 solo usuario)</option>
+                        <option value="Moderador Junior">Moderador Junior</option>
+                        <option value="Moderador Senior">Moderador Senior</option>
+                        <option value="Co-Administrador">Co-Administrador (Mismos poderes totales)</option>
+                        <option value="Usuario">Degradar a Usuario Normal</option>
+                    </select>
+                </div>
+                <div class="bg-gray-50 p-3 rounded-xl border space-y-2">
+                    <span class="font-bold block text-gray-700">Poderes a otorgar:</span>
+                    <label class="flex items-center space-x-2"><input type="checkbox" id="powerCodes" class="rounded text-indigo-600" checked><span>Ver y aprobar códigos de verificación</span></label>
+                    <label class="flex items-center space-x-2"><input type="checkbox" id="powerAuctions" class="rounded text-indigo-600" checked><span>Gestionar y eliminar subastas</span></label>
+                    <label class="flex items-center space-x-2"><input type="checkbox" id="powerAll" class="rounded text-indigo-600" checked><span>Poderes Totales (Igual que Admin Jefe / Presidente)</span></label>
+                </div>
+            </div>
+            <div class="flex justify-end space-x-2">
+                <button onclick="closeModal('ranksModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs">Cancelar</button>
+                <button onclick="saveUserRank()" class="bg-purple-600 text-white font-bold px-4 py-2 rounded-xl text-xs">Guardar Rango</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Listas Desplegables de Usuarios -->
+    <div id="usersDropdownModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'usersDropdownModal')">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-users text-indigo-600 mr-2"></i> Gestión de Usuarios</h3>
+                <button onclick="closeModal('usersDropdownModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="space-y-4 text-xs">
+                <div class="bg-gray-50 p-3 rounded-xl border">
+                    <label class="block font-bold mb-1 text-blue-700"><i class="fas fa-check-circle mr-1"></i> Verificados Activos</label>
+                    <select id="selectVerifiedActive" class="w-full border p-2 rounded-lg bg-white text-xs"><option value="">Cargando...</option></select>
+                </div>
+                <div class="bg-gray-50 p-3 rounded-xl border">
+                    <label class="block font-bold mb-1 text-amber-600"><i class="fas fa-clock mr-1"></i> Desconectados / Pendientes</label>
+                    <select id="selectDisconnected" class="w-full border p-2 rounded-lg bg-white text-xs"><option value="">Cargando...</option></select>
+                </div>
+            </div>
+            <div class="flex justify-end mt-4">
+                <button onclick="closeModal('usersDropdownModal')" class="bg-gray-200 font-bold px-4 py-2 rounded-xl text-xs">Cerrar</button>
             </div>
         </div>
     </div>
@@ -204,7 +518,7 @@
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <div class="bg-amber-100 text-amber-600 text-3xl w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"><i class="fas fa-handshake"></i></div>
             <h3 class="text-base font-bold text-gray-900 mb-2">Normas de Convivencia</h3>
-            <p class="text-xs text-gray-600 mb-4 leading-relaxed">Por favor, mantén siempre el respeto mutuo durante la negociación. Cualquier falta de respeto o fraude será penalizado por la administración.</p>
+            <p class="text-xs text-gray-600 mb-4 leading-relaxed">Por favor, mantén siempre el respeto mutuo durante la negociación.</p>
             <button onclick="enterActualChat()" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-xs mb-2">Entendido, ir al Chat</button>
             <button onclick="closeModal('chatWarningModal')" class="w-full bg-gray-200 text-gray-700 font-semibold py-2 rounded-xl text-xs">Cancelar</button>
         </div>
@@ -220,8 +534,8 @@
             <div class="space-y-4 text-xs mb-4">
                 <div class="bg-gray-50 p-3 rounded-xl border">
                     <label class="block font-bold mb-1">Cambiar Nombre de Usuario</label>
-                    <input type="text" id="newUsernameInput" placeholder="Nuevo nombre de usuario" class="w-full border p-2 rounded-lg mb-1">
-                    <p class="text-[10px] text-gray-500 mb-2">ℹ️ Solo puedes cambiar tu nombre de usuario <strong>1 vez al mes</strong>.</p>
+                    <input type="text" id="newUsernameInput" placeholder="Nuevo nombre" class="w-full border p-2 rounded-lg mb-1">
+                    <p class="text-[10px] text-gray-500 mb-2">ℹ️ Solo puedes cambiar tu nombre <strong>1 vez al mes</strong>.</p>
                     <button onclick="changeUsername()" class="bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold">Actualizar Nombre</button>
                 </div>
                 <div class="bg-gray-50 p-3 rounded-xl border">
@@ -229,15 +543,11 @@
                         <input type="checkbox" id="toggleAnon" class="rounded text-indigo-600">
                         <span class="font-bold">Activar Modo Anónimo en los chats</span>
                     </label>
-                    <p class="text-[10px] text-gray-500 mt-1 leading-relaxed">
-                        ℹ️ <strong>¿Cómo desbloquear?</strong> Debes completar al menos 5 compras o ventas finalizadas con éxito.
-                    </p>
-                    <p id="anonWarning" class="text-[10px] text-red-500 mt-1 hidden">⚠️ Aún no cumples con el requisito de las 5 transacciones exitosas.</p>
+                    <p class="text-[10px] text-gray-500 mt-1 leading-relaxed">ℹ️ Requisito: Mínimo 5 transacciones exitosas.</p>
+                    <p id="anonWarning" class="text-[10px] text-red-500 mt-1 hidden">⚠️ Aún no cumples con el requisito.</p>
                 </div>
             </div>
-            <div class="flex justify-end">
-                <button onclick="saveAccountSettings()" class="bg-indigo-600 text-white font-bold px-4 py-2 rounded-xl text-xs">Guardar Cambios</button>
-            </div>
+            <div class="flex justify-end"><button onclick="saveAccountSettings()" class="bg-indigo-600 text-white font-bold px-4 py-2 rounded-xl text-xs">Guardar Cambios</button></div>
         </div>
     </div>
 
@@ -253,13 +563,8 @@
                 <textarea id="newAuctionDesc" placeholder="Descripción..." class="w-full border p-3 rounded-xl resize-none h-20"></textarea>
                 <input type="text" id="newAuctionLocation" placeholder="Ubicación" class="w-full border p-3 rounded-xl">
                 <select id="newAuctionCategory" class="w-full border p-3 rounded-xl bg-white"><option value="Tecnología">Tecnología</option><option value="Vehículos">Vehículos</option></select>
-                <input type="number" id="newAuctionPrice" step="1000" min="1000" placeholder="Precio (Sube de 1.000 en 1.000)" class="w-full border p-3 rounded-xl">
-                
-                <label class="flex items-center space-x-2 pt-2">
-                    <input type="checkbox" id="allowAnonCheck" class="rounded text-indigo-600">
-                    <span class="font-semibold">¿Permitir compradores anónimos en esta subasta?</span>
-                </label>
-
+                <input type="number" id="newAuctionPrice" step="1000" min="1000" placeholder="Precio" class="w-full border p-3 rounded-xl">
+                <label class="flex items-center space-x-2 pt-2"><input type="checkbox" id="allowAnonCheck" class="rounded text-indigo-600"><span class="font-semibold">¿Permitir compradores anónimos?</span></label>
                 <input type="file" id="newAuctionImageFile" accept="image/*" class="w-full border p-2 rounded-xl bg-gray-50 text-xs">
             </div>
             <div class="flex justify-end space-x-2">
@@ -269,14 +574,19 @@
         </div>
     </div>
 
-    <!-- Modales de verificación y Admin -->
+    <!-- Modales de Verificación y Admin -->
     <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verifica tu Teléfono</h3>
             <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
-            <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-xs">Verificar</button>
+            <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-xs mb-3">Verificar</button>
+            <div class="text-xs text-gray-500">
+                <span id="timerText">Reenviar código en <strong id="countdown">60</strong>s</span>
+                <button id="resendBtn" onclick="resendCode()" class="hidden text-indigo-600 font-bold hover:underline">Solicitar nuevo código</button>
+            </div>
         </div>
     </div>
+
     <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <h3 id="adminModalTitle" class="text-base font-bold text-gray-900 mb-4">Códigos Pendientes</h3>
@@ -293,17 +603,24 @@
     <!-- Modal de Registro -->
     <div id="registerModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'registerModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
-            <h3 class="text-lg font-bold">Crear Cuenta</h3>
+            <h3 class="text-lg font-bold">Crear Cuenta <span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">¡Los primeros 100 son Fundadores 👑!</span></h3>
             <input type="text" id="regFullName" placeholder="Nombre completo" class="w-full border p-3 rounded-xl">
-            <input type="text" id="regUsername" placeholder="Usuario" class="w-full border p-3 rounded-xl">
-            <input type="email" id="regEmail" placeholder="Correo" class="w-full border p-3 rounded-xl">
+            <div>
+                <input type="text" id="regUsername" placeholder="Usuario (ej. juanperez)" class="w-full border p-3 rounded-xl" oninput="clearRegError('regUsername')">
+                <p id="regUsernameError" class="text-xs text-red-500 mt-1 hidden"></p>
+            </div>
+            <div>
+                <input type="email" id="regEmail" placeholder="Correo" class="w-full border p-3 rounded-xl" oninput="clearRegError('regEmail')">
+                <p id="regEmailError" class="text-xs text-red-500 mt-1 hidden"></p>
+            </div>
             <div class="relative">
                 <input type="password" id="regPassword" placeholder="Contraseña" class="w-full border p-3 rounded-xl pr-10">
-                <button type="button" onclick="togglePassword('regPassword', 'eyeRegIcon')" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600">
-                    <i id="eyeRegIcon" class="fas fa-eye"></i>
-                </button>
+                <button type="button" onclick="togglePassword('regPassword', 'eyeRegIcon')" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600"><i id="eyeRegIcon" class="fas fa-eye"></i></button>
             </div>
-            <input type="tel" id="regPhone" placeholder="Número de teléfono" class="w-full border p-3 rounded-xl">
+            <div>
+                <input type="tel" id="regPhone" placeholder="Número de teléfono" class="w-full border p-3 rounded-xl" oninput="clearRegError('regPhone')">
+                <p id="regPhoneError" class="text-xs text-red-500 mt-1 hidden"></p>
+            </div>
             <button onclick="handleRegistrationUpload()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Registrarse</button>
             <p class="text-center text-xs text-gray-500 pt-2">¿Ya tienes cuenta? <button onclick="switchToModal('loginModal')" class="text-indigo-600 font-bold hover:underline">Inicia sesión</button></p>
         </div>
@@ -316,18 +633,19 @@
             <input type="text" id="loginUser" placeholder="Usuario o Correo" class="w-full border p-3 rounded-xl">
             <div class="relative">
                 <input type="password" id="loginPass" placeholder="Contraseña" class="w-full border p-3 rounded-xl pr-10">
-                <button type="button" onclick="togglePassword('loginPass', 'eyeLoginIcon')" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600">
-                    <i id="eyeLoginIcon" class="fas fa-eye"></i>
-                </button>
+                <button type="button" onclick="togglePassword('loginPass', 'eyeLoginIcon')" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600"><i id="eyeLoginIcon" class="fas fa-eye"></i></button>
             </div>
             <button onclick="handleLogin()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Entrar</button>
             <p class="text-center text-xs text-gray-500 pt-2">¿No tienes cuenta? <button onclick="switchToModal('registerModal')" class="text-indigo-600 font-bold hover:underline">Regístrate aquí</button></p>
         </div>
     </div>
 
-    <!-- Script General con Cloud unificado -->
+    <!-- Script General -->
     <script>
         let verificationStep = 'phone';
+        let countdownInterval;
+        let resendAttempts = 0;
+        let activeTicketId = null;
 
         window.onload = function() {
             const activeUser = localStorage.getItem('bidora_active_user');
@@ -335,15 +653,12 @@
             if (activeUser === 'yefermc') { isAdmin = true; }
 
             if (activeUser) {
-                if (isAdmin) {
-                    document.getElementById('adminToolbar').classList.remove('hidden');
-                }
+                if (isAdmin) { document.getElementById('adminToolbar').classList.remove('hidden'); }
                 const phoneVer = localStorage.getItem('bidora_phone_verified') === 'true';
                 const emailVer = localStorage.getItem('bidora_email_verified') === 'true';
-                setAuthUI(activeUser, phoneVer && emailVer, isAdmin);
-            } else {
-                setGuestUI();
-            }
+                const isFounder = localStorage.getItem('bidora_is_founder') === 'true';
+                setAuthUI(activeUser, phoneVer && emailVer, isAdmin, isFounder);
+            } else { setGuestUI(); }
 
             if(localStorage.getItem('bidora_anon_mode') === 'true') {
                 const toggle = document.getElementById('toggleAnon');
@@ -358,95 +673,249 @@
             `;
         }
 
-        function setAuthUI(username, fullyVerified, isAdmin) {
+        function setAuthUI(username, fullyVerified, isAdmin, isFounder) {
             const isAnon = localStorage.getItem('bidora_anon_mode') === 'true';
             const displayName = isAnon ? 'Anónimo 👤' : username;
             const badgeStyle = fullyVerified ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700";
+            const founderBadge = isFounder ? `<span class="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded font-bold ml-1">Fundador 👑</span>` : '';
 
             document.getElementById('authContainer').innerHTML = `
-                <div class="flex items-center space-x-2 mr-2">
+                <div class="flex items-center space-x-1 sm:space-x-2 mr-2">
                     <span class="text-sm font-semibold text-gray-800">${displayName}</span>
+                    ${founderBadge}
                     <span class="text-[10px] px-1.5 py-0.5 rounded ${badgeStyle}">${fullyVerified ? '100% Verificado 🔵' : 'Estándar'}</span>
                 </div>
                 <button onclick="logout()" class="text-red-500 text-xs font-semibold hover:underline">Salir</button>
             `;
         }
 
+        function openSupportModal(type) {
+            document.getElementById('supportModalTitle').innerText = type === 'Ayuda' ? 'Solicitar Ayuda' : 'Enviar Sugerencia';
+            document.getElementById('supportMessage').value = '';
+            openModal('supportModal');
+        }
+
+        async function submitSupportTicket() {
+            const msg = document.getElementById('supportMessage').value.trim();
+            const type = document.getElementById('supportModalTitle').innerText.includes('Ayuda') ? 'Ayuda' : 'Sugerencia';
+            if(!msg) { alert('Escribe un mensaje.'); return; }
+            await window.sendSupportTicket(type, msg);
+        }
+
+        // Paneles Admin de Ayuda y Sugerencias
+        async function openAdminHelpPanel() {
+            openModal('adminHelpModal');
+            const list = document.getElementById('adminHelpTicketsList');
+            list.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
+            const tickets = await window.getSupportTickets('Ayuda');
+            list.innerHTML = '';
+            if(tickets.length === 0) {
+                list.innerHTML = '<p class="text-center text-gray-400">No hay solicitudes de ayuda.</p>';
+            } else {
+                tickets.forEach(t => {
+                    list.innerHTML += `
+                        <div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-indigo-600">Usuario: ${t.user}</span>
+                                <p class="text-gray-700 truncate w-60">${t.message}</p>
+                                <span class="text-[9px] text-gray-400">Estado: ${t.status || 'Abierto'}</span>
+                            </div>
+                            <div class="flex space-x-2">
+                                <button onclick="openPrivateChat('${t.id}', '${t.user}')" class="bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-bold text-[10px]">Abrir Chat</button>
+                                <button onclick="deleteTicket('${t.id}', 'Ayuda')" class="bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs" title="Borrar"><i class="fas fa-times"></i></button>
+                            </div>
+                        </div>`;
+                });
+            }
+        }
+
+        async function openAdminSuggestionsPanel() {
+            openModal('adminSuggestionsModal');
+            const list = document.getElementById('adminSuggestionsList');
+            list.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
+            const tickets = await window.getSupportTickets('Sugerencia');
+            list.innerHTML = '';
+            if(tickets.length === 0) {
+                list.innerHTML = '<p class="text-center text-gray-400">No hay sugerencias registradas.</p>';
+            } else {
+                tickets.forEach(t => {
+                    list.innerHTML += `
+                        <div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-amber-600">${t.user}</span>
+                                <p class="text-gray-700 mt-1">${t.message}</p>
+                            </div>
+                            <button onclick="deleteTicket('${t.id}', 'Sugerencia')" class="bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs" title="Borrar"><i class="fas fa-times"></i></button>
+                        </div>`;
+                });
+            }
+        }
+
+        async function deleteTicket(id, type) {
+            await window.deleteSupportTicket(id);
+            if(type === 'Ayuda') openAdminHelpPanel();
+            else openAdminSuggestionsPanel();
+        }
+
+        // Chat Privado Admin-Usuario
+        async function openPrivateChat(ticketId, username) {
+            activeTicketId = ticketId;
+            document.getElementById('privateChatTitle').innerText = `Chat Privado con: ${username}`;
+            openModal('privateChatModal');
+            await loadPrivateMessages();
+        }
+
+        async function loadPrivateMessages() {
+            const container = document.getElementById('privateMessagesContainer');
+            container.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
+            const msgs = await window.getPrivateSupportMessages(activeTicketId);
+            container.innerHTML = '';
+            if(msgs.length === 0) {
+                container.innerHTML = '<p class="text-center text-gray-400">Inicia la conversación con el usuario.</p>';
+            } else {
+                msgs.forEach(m => {
+                    container.innerHTML += `<div class="bg-white p-2 rounded-lg border shadow-sm"><strong>${m.sender}:</strong> <p class="text-gray-700">${m.message}</p></div>`;
+                });
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        async function sendPrivateMsg() {
+            const input = document.getElementById('privateChatInput');
+            const msg = input.value.trim();
+            if(!msg || !activeTicketId) return;
+            const sender = localStorage.getItem('bidora_active_user') || 'Admin';
+            await window.sendPrivateSupportMessage(activeTicketId, sender, msg);
+            input.value = '';
+            await loadPrivateMessages();
+        }
+
+        async function closeThisTicket() {
+            if(!activeTicketId) return;
+            await window.closeSupportTicketByAdmin(activeTicketId);
+            closeModal('privateChatModal');
+            openAdminHelpPanel();
+        }
+
+        async function openStaffChatModal() {
+            openModal('staffChatModal');
+            await loadStaffMessages();
+            await loadOnlineStaff();
+        }
+
+        async function loadStaffMessages() {
+            const container = document.getElementById('staffMessagesContainer');
+            container.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
+            const messages = await window.getStaffChatMessages();
+            container.innerHTML = '';
+            if (messages.length === 0) {
+                container.innerHTML = '<p class="text-center text-gray-400">No hay mensajes en el chat de staff.</p>';
+            } else {
+                messages.forEach(m => {
+                    container.innerHTML += `<div class="bg-white p-2 rounded-lg border shadow-sm"><strong>${m.sender}</strong> <span class="text-[10px] text-gray-400">(${m.role})</span><p class="text-gray-700 mt-0.5">${m.message}</p></div>`;
+                });
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        async function loadOnlineStaff() {
+            const onlineList = document.getElementById('onlineStaffList');
+            const currentUser = localStorage.getItem('bidora_active_user') || 'Admin';
+            const currentRole = localStorage.getItem('bidora_role') || 'Admin';
+            onlineList.innerHTML = `<div class="flex items-center space-x-1.5"><span class="w-2 h-2 rounded-full bg-green-500"></span><strong class="truncate">${currentUser} (${currentRole})</strong></div>`;
+        }
+
+        async function sendStaffMsg() {
+            const input = document.getElementById('staffChatInput');
+            const msg = input.value.trim();
+            if(!msg) return;
+            await window.sendStaffChatMessage(msg);
+            input.value = '';
+            await loadStaffMessages();
+        }
+
+        async function openRanksModal() {
+            openModal('ranksModal');
+            const select = document.getElementById('rankUserSelect');
+            select.innerHTML = '<option value="">Cargando usuarios...</option>';
+            const { verifiedActive } = await window.getAllUsersForAdmin();
+            select.innerHTML = verifiedActive.length ? '' : '<option value="">No hay usuarios verificados</option>';
+            verifiedActive.forEach(u => {
+                select.innerHTML += `<option value="${u.id}">${u.username} (Actual: ${u.role}) ${u.founder ? '👑 Fundador' : ''}</option>`;
+            });
+        }
+
+        async function saveUserRank() {
+            const userId = document.getElementById('rankUserSelect').value;
+            const role = document.getElementById('rankTitleSelect').value;
+            const powers = {
+                codes: document.getElementById('powerCodes').checked,
+                auctions: document.getElementById('powerAuctions').checked,
+                all: document.getElementById('powerAll').checked
+            };
+            if(!userId) { alert('Selecciona un usuario.'); return; }
+            await window.updateUserRoleAndPowers(userId, role, powers);
+            closeModal('ranksModal');
+        }
+
+        function clearRegError(field) {
+            if (field === 'regUsername') { document.getElementById('regUsername').classList.remove('border-red-500'); document.getElementById('regUsernameError').classList.add('hidden'); }
+            else if (field === 'regEmail') { document.getElementById('regEmail').classList.remove('border-red-500'); document.getElementById('regEmailError').classList.add('hidden'); }
+            else if (field === 'regPhone') { document.getElementById('regPhone').classList.remove('border-red-500'); document.getElementById('regPhoneError').classList.add('hidden'); }
+        }
+
+        function startCountdown() {
+            let timeLeft = 60;
+            if (resendAttempts === 1) { timeLeft = 300; }
+            else if (resendAttempts >= 2) { timeLeft = 3600; }
+            const countdownEl = document.getElementById('countdown');
+            const timerTextEl = document.getElementById('timerText');
+            const resendBtn = document.getElementById('resendBtn');
+            resendBtn.classList.add('hidden');
+            timerTextEl.classList.remove('hidden');
+            clearInterval(countdownInterval);
+            countdownInterval = setInterval(() => {
+                let minutes = Math.floor(timeLeft / 60);
+                let seconds = timeLeft % 60;
+                countdownEl.innerText = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+                timeLeft--;
+                if (timeLeft < 0) { clearInterval(countdownInterval); timerTextEl.classList.add('hidden'); resendBtn.classList.remove('hidden'); }
+            }, 1000);
+        }
+
+        function resendCode() { resendAttempts++; alert('¡Nuevo código solicitado!'); startCountdown(); }
         function togglePassword(fieldId, iconId) {
             const field = document.getElementById(fieldId);
             const icon = document.getElementById(iconId);
-            if (field.type === "password") {
-                field.type = "text";
-                icon.classList.remove("fa-eye");
-                icon.classList.add("fa-eye-slash");
-            } else {
-                field.type = "password";
-                icon.classList.remove("fa-eye-slash");
-                icon.classList.add("fa-eye");
-            }
+            if (field.type === "password") { field.type = "text"; icon.classList.remove("fa-eye"); icon.classList.add("fa-eye-slash"); }
+            else { field.type = "password"; icon.classList.remove("fa-eye-slash"); icon.classList.add("fa-eye"); }
         }
-
-        function switchToModal(targetId) {
-            closeModal('loginModal');
-            closeModal('registerModal');
-            openModal(targetId);
-        }
-
-        function checkOutsideClose(event, modalId) {
-            if (event.target.classList.contains('modal-backdrop')) {
-                closeModal(modalId);
-            }
-        }
+        function switchToModal(targetId) { closeModal('loginModal'); closeModal('registerModal'); openModal(targetId); }
+        function checkOutsideClose(event, modalId) { if (event.target.classList.contains('modal-backdrop')) { closeModal(modalId); } }
 
         function changeUsername() {
             const lastChange = localStorage.getItem('bidora_last_name_change');
             const now = new Date().getTime();
-            const oneMonth = 30 * 24 * 60 * 60 * 1000;
-
-            if (lastChange && (now - lastChange < oneMonth)) {
-                alert('⚠️ Solo puedes cambiar tu nombre de usuario una vez al mes.');
-                return;
-            }
-
-            const newName = document.getElementById('newUsernameInput').value.trim();
-            if (!newName) {
-                alert('Por favor escribe un nuevo nombre.');
-                return;
-            }
-
+            if (lastChange && (now - lastChange < 30 * 24 * 60 * 60 * 1000)) { alert('⚠️ Solo puedes cambiar tu nombre 1 vez al mes.'); return; }
+            const newName = document.getElementById('newUsernameInput').value.trim().toLowerCase();
+            if (!newName) { alert('Escribe un nombre.'); return; }
             localStorage.setItem('bidora_active_user', newName);
             localStorage.setItem('bidora_last_name_change', now);
-            alert('¡Nombre de usuario actualizado con éxito!');
-            location.reload();
+            alert('¡Nombre actualizado!'); location.reload();
         }
 
         function preChatCheck(allowAnon) {
-            const isAnon = localStorage.getItem('bidora_anon_mode') === 'true';
-            if (isAnon && allowAnon !== 'true') {
-                alert('⚠️ Esta subasta no permite compradores anónimos.');
-                return;
-            }
+            if (localStorage.getItem('bidora_anon_mode') === 'true' && allowAnon !== 'true') { alert('⚠️ Subasta no permite anónimos.'); return; }
             openModal('chatWarningModal');
         }
-
-        function enterActualChat() {
-            closeModal('chatWarningModal');
-            alert('¡Entrando a la sala de chat de la negociación!');
-        }
+        function enterActualChat() { closeModal('chatWarningModal'); alert('¡Entrando al chat!'); }
 
         function saveAccountSettings() {
             const trades = Number(localStorage.getItem('bidora_trades') || 0);
             const wantAnon = document.getElementById('toggleAnon').checked;
-
-            if (wantAnon && trades < 5) {
-                document.getElementById('anonWarning').classList.remove('hidden');
-                return;
-            }
-
+            if (wantAnon && trades < 5) { document.getElementById('anonWarning').classList.remove('hidden'); return; }
             localStorage.setItem('bidora_anon_mode', wantAnon ? 'true' : 'false');
-            alert('¡Ajustes guardados con éxito!');
-            closeModal('settingsModal');
-            location.reload();
+            alert('¡Ajustes guardados!'); closeModal('settingsModal'); location.reload();
         }
 
         function handleAuctionPublish() {
@@ -457,9 +926,7 @@
             const price = document.getElementById('newAuctionPrice').value;
             const allowAnon = document.getElementById('allowAnonCheck').checked;
             const fileInput = document.getElementById('newAuctionImageFile');
-
             if (!title || !price) { alert('Completa título y precio.'); return; }
-
             if (fileInput.files && fileInput.files[0]) {
                 const reader = new FileReader();
                 reader.onload = function(e) { window.saveAuctionToFirebase(title, category, price, description, location, allowAnon, e.target.result); };
@@ -478,42 +945,39 @@
                 localStorage.setItem('bidora_email_verified', logged.emailVerified ? 'true' : 'false');
                 localStorage.setItem('bidora_trades', logged.successfulTrades || 0);
                 localStorage.setItem('bidora_anon_mode', logged.anonMode ? 'true' : 'false');
-                if(logged.isAdmin) { localStorage.setItem('bidora_is_admin', 'true'); }
-                alert('¡Bienvenido!');
-                location.reload();
+                localStorage.setItem('bidora_is_founder', logged.isFounder ? 'true' : 'false');
+                localStorage.setItem('bidora_role', logged.role || 'Admin');
+                if(logged.isAdmin || logged.role === 'Presidente') { localStorage.setItem('bidora_is_admin', 'true'); }
+                alert('¡Bienvenido!'); location.reload();
             } else { alert('Credenciales incorrectas.'); }
         }
 
-        function handleRegistrationUpload() {
+        async function handleRegistrationUpload() {
             const fullName = document.getElementById('regFullName').value.trim();
             const username = document.getElementById('regUsername').value.trim();
             const email = document.getElementById('regEmail').value.trim();
             const password = document.getElementById('regPassword').value;
             const phone = document.getElementById('regPhone').value.trim();
-
             if (!fullName || !username || !email || !password || !phone) { alert('Completa los campos.'); return; }
-            
-            window.registerUserInCloud(fullName, username, email, password, phone, '').then(res => {
-                if(res) {
-                    localStorage.setItem('bidora_temp_user_id', res.id);
-                    localStorage.setItem('bidora_active_user', username);
-                    closeModal('registerModal');
-                    openModal('verifyModal');
-                } else {
-                    alert('Error al registrar en la nube.');
-                }
-            });
+            const res = await window.registerUserInCloud(fullName, username, email, password, phone, '');
+            if (res && res.error) {
+                const input = document.getElementById(res.errorField === 'username' ? 'regUsername' : res.errorField === 'email' ? 'regEmail' : 'regPhone');
+                const err = document.getElementById(`${input.id}Error`);
+                input.classList.add('border-red-500'); err.innerText = res.error; err.classList.remove('hidden');
+                return;
+            }
+            if(res && res.id) {
+                localStorage.setItem('bidora_temp_user_id', res.id);
+                localStorage.setItem('bidora_active_user', username.toLowerCase());
+                localStorage.setItem('bidora_is_founder', res.isFounder ? 'true' : 'false');
+                resendAttempts = 0; closeModal('registerModal'); openModal('verifyModal'); startCountdown();
+            } else { alert('Error al registrar.'); }
         }
 
         async function submitVerificationCode() {
             const codeInput = document.getElementById('verifyInputCode').value.trim();
             const userId = localStorage.getItem('bidora_temp_user_id');
-            
-            if(!codeInput) {
-                alert('Introduce el código.');
-                return;
-            }
-
+            if(!codeInput) { alert('Introduce el código.'); return; }
             const isValid = await window.verifyCodeInCloud(userId, verificationStep, codeInput);
             if (isValid) {
                 if (verificationStep === 'phone') {
@@ -521,46 +985,44 @@
                     verificationStep = 'email';
                     document.getElementById('verifyInputCode').value = '';
                     document.getElementById('verifyModalTitle').innerText = "Verifica tu Correo";
-                    alert('¡Teléfono verificado! Ahora verifica tu correo.');
+                    resendAttempts = 0; alert('¡Teléfono verificado! Ahora verifica tu correo.'); startCountdown();
                 } else {
                     localStorage.setItem('bidora_email_verified', 'true');
-                    closeModal('verifyModal');
-                    alert('¡Cuenta 100% verificada!');
-                    location.reload();
+                    closeModal('verifyModal'); alert('¡Cuenta 100% verificada!'); location.reload();
                 }
-            } else { 
-                alert('Código incorrecto. Revisa el panel del administrador.'); 
-            }
+            } else { alert('Código incorrecto'); }
         }
 
         async function openAdminVerificationPanel(type) {
             verificationStep = type;
             const list = document.getElementById('adminVerifList');
-            const titleEl = document.getElementById('adminModalTitle');
-            list.innerHTML = '<p class="text-center text-gray-400 py-2">Buscando en la nube...</p>';
+            document.getElementById('adminModalTitle').innerHTML = type === 'phone' ? 'Códigos Pendientes (Teléfono)' : 'Códigos Pendientes (Correo)';
+            list.innerHTML = '<p class="text-center text-gray-400 py-2">Buscando...</p>';
             openModal('adminVerifModal');
-
-            titleEl.innerHTML = type === 'phone' ? 'Códigos Pendientes (Teléfono)' : 'Códigos Pendientes (Correo)';
-            
             let pending = await window.getPendingCodesFromCloud(type);
             list.innerHTML = '';
-
-            if (pending.length === 0) {
-                list.innerHTML = '<p class="text-gray-400 text-center py-2">No hay códigos pendientes.</p>';
-            } else {
+            if (pending.length === 0) { list.innerHTML = '<p class="text-gray-400 text-center py-2">No hay códigos pendientes.</p>'; }
+            else {
                 pending.forEach(item => {
-                    list.innerHTML += `<div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center"><span>Usuario: <strong>${item.user}</strong></span><strong class="text-indigo-600 text-base">${item.code}</strong></div>`;
+                    list.innerHTML += `<div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center"><div><span class="block">Usuario: <strong>${item.user}</strong></span><strong class="text-indigo-600 text-base">${item.code}</strong></div><button onclick="markAsVerifiedByAdmin('${item.id}', '${type}')" class="bg-red-500 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold shadow"><i class="fas fa-times"></i></button></div>`;
                 });
             }
         }
 
-        function logout() { 
-            localStorage.clear(); 
-            location.reload(); 
+        async function openUsersDropdownModal() {
+            openModal('usersDropdownModal');
+            const activeSelect = document.getElementById('selectVerifiedActive');
+            const discSelect = document.getElementById('selectDisconnected');
+            const { verifiedActive, disconnectedPending } = await window.getAllUsersForAdmin();
+            activeSelect.innerHTML = verifiedActive.length ? '' : '<option value="">No hay verificados</option>';
+            verifiedActive.forEach(u => { activeSelect.innerHTML += `<option value="${u.username}">${u.username} (${u.role}) ${u.founder ? '👑 Fundador' : ''}</option>`; });
+            discSelect.innerHTML = disconnectedPending.length ? '' : '<option value="">No hay pendientes</option>';
+            disconnectedPending.forEach(u => { discSelect.innerHTML += `<option value="${u.username}">${u.username} (Pendiente)</option>`; });
         }
 
-        function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
-        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+        function logout() { localStorage.clear(); location.reload(); }
+        function openModal(id) { document.getElementById(id).classList.add('block'); document.getElementById(id).classList.remove('hidden'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('block'); document.getElementById(id).classList.add('hidden'); }
     </script>
 </body>
 </html>
