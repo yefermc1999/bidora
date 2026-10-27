@@ -161,7 +161,7 @@
     </div>
 
     <!-- Modal de Advertencia Previa al Chat -->
-    <div id="chatWarningModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+    <div id="chatWarningModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'chatWarningModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <div class="bg-amber-100 text-amber-600 text-3xl w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"><i class="fas fa-handshake"></i></div>
             <h3 class="text-base font-bold text-gray-900 mb-2">Normas de Convivencia</h3>
@@ -172,7 +172,7 @@
     </div>
 
     <!-- Modal Ajustes de Cuenta -->
-    <div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+    <div id="settingsModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'settingsModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-base font-bold text-gray-900"><i class="fas fa-user-cog text-indigo-600 mr-2"></i> Configuración de Cuenta</h3>
@@ -203,7 +203,7 @@
     </div>
 
     <!-- Modal Crear Subasta -->
-    <div id="auctionCreateModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+    <div id="auctionCreateModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'auctionCreateModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-gavel text-amber-500 mr-2"></i> Publicar Producto</h3>
@@ -231,14 +231,14 @@
     </div>
 
     <!-- Modales de verificación y Admin -->
-    <div id="verifyModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+    <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verifica tu Teléfono</h3>
             <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
             <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-xs">Verificar</button>
         </div>
     </div>
-    <div id="adminVerifModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+    <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <h3 id="adminModalTitle" class="text-base font-bold text-gray-900 mb-4">Códigos Pendientes</h3>
             <div id="adminVerifList" class="space-y-2 max-h-48 overflow-y-auto mb-4 text-xs"></div>
@@ -251,28 +251,42 @@
         <div id="auctionGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </main>
 
-    <!-- Registro y Login -->
-    <div id="registerModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <!-- Modal de Registro -->
+    <div id="registerModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'registerModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
             <h3 class="text-lg font-bold">Crear Cuenta</h3>
             <input type="text" id="regFullName" placeholder="Nombre completo" class="w-full border p-3 rounded-xl">
             <input type="text" id="regUsername" placeholder="Usuario" class="w-full border p-3 rounded-xl">
             <input type="email" id="regEmail" placeholder="Correo" class="w-full border p-3 rounded-xl">
-            <input type="password" id="regPassword" placeholder="Contraseña" class="w-full border p-3 rounded-xl">
+            <div class="relative">
+                <input type="password" id="regPassword" placeholder="Contraseña" class="w-full border p-3 rounded-xl pr-10">
+                <button type="button" onclick="togglePassword('regPassword', 'eyeRegIcon')" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600">
+                    <i id="eyeRegIcon" class="fas fa-eye"></i>
+                </button>
+            </div>
             <input type="tel" id="regPhone" placeholder="WhatsApp" class="w-full border p-3 rounded-xl">
             <button onclick="handleRegistrationUpload()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Registrarse</button>
-        </div>
-    </div>
-    <div id="loginModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
-            <h3 class="text-lg font-bold">Iniciar Sesión</h3>
-            <input type="text" id="loginUser" placeholder="Usuario o Correo" class="w-full border p-3 rounded-xl">
-            <input type="password" id="loginPass" placeholder="Contraseña" class="w-full border p-3 rounded-xl">
-            <button onclick="handleLogin()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Entrar</button>
+            <p class="text-center text-xs text-gray-500 pt-2">¿Ya tienes cuenta? <button onclick="switchToModal('loginModal')" class="text-indigo-600 font-bold hover:underline">Inicia sesión</button></p>
         </div>
     </div>
 
-    <!-- Script General Corregido -->
+    <!-- Modal de Inicio de Sesión (Actualizado con mostrar contraseña y registro) -->
+    <div id="loginModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'loginModal')">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
+            <h3 class="text-lg font-bold">Iniciar Sesión</h3>
+            <input type="text" id="loginUser" placeholder="Usuario o Correo" class="w-full border p-3 rounded-xl">
+            <div class="relative">
+                <input type="password" id="loginPass" placeholder="Contraseña" class="w-full border p-3 rounded-xl pr-10">
+                <button type="button" onclick="togglePassword('loginPass', 'eyeLoginIcon')" class="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600">
+                    <i id="eyeLoginIcon" class="fas fa-eye"></i>
+                </button>
+            </div>
+            <button onclick="handleLogin()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Entrar</button>
+            <p class="text-center text-xs text-gray-500 pt-2">¿No tienes cuenta? <button onclick="switchToModal('registerModal')" class="text-indigo-600 font-bold hover:underline">Regístrate aquí</button></p>
+        </div>
+    </div>
+
+    <!-- Script General -->
     <script>
         let currentUserId = null;
         let verificationStep = 'phone';
@@ -318,6 +332,35 @@
                 </div>
                 <button onclick="logout()" class="text-red-500 text-xs font-semibold hover:underline">Salir</button>
             `;
+        }
+
+        // Función para mostrar u ocultar contraseña
+        function togglePassword(fieldId, iconId) {
+            const field = document.getElementById(fieldId);
+            const icon = document.getElementById(iconId);
+            if (field.type === "password") {
+                field.type = "text";
+                icon.classList.remove("fa-eye");
+                icon.classList.add("fa-eye-slash");
+            } else {
+                field.type = "password";
+                icon.classList.remove("fa-eye-slash");
+                icon.classList.add("fa-eye");
+            }
+        }
+
+        // Cambiar entre modales de manera fluida
+        function switchToModal(targetId) {
+            closeModal('loginModal');
+            closeModal('registerModal');
+            openModal(targetId);
+        }
+
+        // Cerrar modal al hacer clic en el fondo oscuro
+        function checkOutsideClose(event, modalId) {
+            if (event.target.classList.contains('modal-backdrop')) {
+                closeModal(modalId);
+            }
         }
 
         function changeUsername() {
@@ -407,7 +450,7 @@
         }
 
         function handleRegistrationUpload() {
-            const fullName = document.getElementById('regFullName').value.trim();
+            const fullName = document.getElementById('regFullName'].value.trim();
             const username = document.getElementById('regUsername').value.trim();
             const email = document.getElementById('regEmail').value.trim();
             const password = document.getElementById('regPassword').value;
