@@ -3,16 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bidora - Subastas en Línea</title>
+    <title>Bidora - Subastas y Chats Seguros</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK (Google Cloud Database) -->
+    <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // TUS CREDENCIALES OFICIALES DE FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyBz5akqL6ij-T9S3kn9r0716Ng7yA8hmc8",
             authDomain: "bidora-aca53.firebaseapp.com",
@@ -26,25 +25,19 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // 1. GUARDAR SUBASTA CON IMAGEN LOCAL EN LA NUBE
-        window.saveAuctionToFirebase = async function(title, category, price, image) {
+        window.saveAuctionToFirebase = async function(title, category, price, description, location, allowAnon, image) {
             try {
                 await addDoc(collection(db, "subastas"), {
-                    title,
-                    category,
-                    price,
+                    title, category, price: Number(price), description, location, allowAnon,
                     image: image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=500&q=80',
+                    seller: localStorage.getItem('bidora_active_user') || 'yefermc',
                     createdAt: new Date()
                 });
-                alert('¡Subasta publicada con éxito en la nube de Google!');
+                alert('¡Subasta publicada con éxito en la nube!');
                 location.reload();
-            } catch (e) {
-                console.error("Error al guardar subasta: ", e);
-                alert('Error al conectar con la nube.');
-            }
+            } catch (e) { console.error("Error al publicar: ", e); }
         };
 
-        // 2. CARGAR SUBASTAS DESDE LA NUBE
         window.loadFirebaseAuctions = async function() {
             try {
                 const querySnapshot = await getDocs(collection(db, "subastas"));
@@ -53,103 +46,87 @@
                 
                 querySnapshot.forEach((docSnap) => {
                     const item = docSnap.data();
-                    const formattedPrice = Number(item.price).toLocaleString();
                     const card = document.createElement('div');
                     card.className = "auction-card bg-white rounded-xl shadow-sm hover:shadow-md transition overflow-hidden border border-gray-100 flex flex-col relative";
-                    card.setAttribute('data-category', item.category);
                     card.innerHTML = `
                         <div class="relative">
                             <img src="${item.image}" alt="${item.title}" class="w-full h-48 object-cover">
-                            <span class="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full"><i class="fas fa-clock mr-1"></i> 24:00:00</span>
+                            <span class="absolute top-2 right-2 bg-indigo-600 text-white text-xs font-bold px-2.5 py-1 rounded-full">${item.allowAnon ? 'Permite Anónimos' : 'Solo Verificados'}</span>
                         </div>
                         <div class="p-4 flex-1 flex flex-col justify-between">
                             <div>
                                 <span class="text-xs text-indigo-600 font-semibold uppercase tracking-wider">${item.category}</span>
-                                <h3 class="font-semibold text-gray-900 mt-1 line-clamp-1">${item.title}</h3>
+                                <h3 class="font-semibold text-gray-900 mt-1">${item.title}</h3>
+                                <p class="text-xs text-gray-500 mt-1">${item.description || ''}</p>
                             </div>
                             <div class="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-                                <div>
-                                    <span class="text-xs text-gray-400 block">Puja Inicial</span>
-                                    <span class="text-lg font-bold text-indigo-600">$${formattedPrice}</span>
-                                </div>
-                                <button onclick="alert('Inicia sesión para pujar')" class="bg-gray-900 hover:bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Pujar</button>
+                                <span class="text-lg font-bold text-indigo-600">$${Number(item.price).toLocaleString()}</span>
+                                <button onclick="preChatCheck('${item.allowAnon}')" class="bg-gray-900 hover:bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-lg">Entrar al Chat</button>
                             </div>
-                        </div>
-                    `;
+                        </div>`;
                     grid.appendChild(card);
                 });
-            } catch (e) {
-                console.log("Error cargando subastas");
-            }
+            } catch (e) { console.log("Error cargando subastas"); }
         };
 
-        // 3. REGISTRAR USUARIO Y GENERAR CÓDIGO EN LA NUBE
-        window.registerUserInCloud = async function(fullName, username, password, phone, profilePic) {
+        window.registerUserInCloud = async function(fullName, username, email, password, phone, profilePic) {
             try {
-                const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
-                
+                const phoneCode = Math.floor(100000 + Math.random() * 900000).toString();
+                const emailCode = Math.floor(100000 + Math.random() * 900000).toString();
+
                 const docRef = await addDoc(collection(db, "usuarios"), {
-                    fullName,
-                    username,
-                    password,
-                    phone,
+                    fullName, username, email, password, phone,
                     profilePic: profilePic || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
-                    verificationCode: generatedCode,
-                    verified: false,
+                    phoneCode, emailCode,
+                    phoneVerified: false, emailVerified: false,
+                    isAdmin: false,
+                    successfulTrades: 0,
+                    anonMode: false,
                     createdAt: new Date()
                 });
 
-                let pending = JSON.parse(localStorage.getItem('bidora_pending')) || [];
-                pending.push({ id: docRef.id, user: username, phone: phone, code: generatedCode });
-                localStorage.setItem('bidora_pending', JSON.stringify(pending));
+                let pendingPhones = JSON.parse(localStorage.getItem('bidora_pending_phones')) || [];
+                let pendingEmails = JSON.parse(localStorage.getItem('bidora_pending_emails')) || [];
+                pendingPhones.push({ id: docRef.id, user: username, phone, code: phoneCode });
+                pendingEmails.push({ id: docRef.id, user: username, email, code: emailCode });
+                localStorage.setItem('bidora_pending_phones', JSON.stringify(pendingPhones));
+                localStorage.setItem('bidora_pending_emails', JSON.stringify(pendingEmails));
 
-                return { id: docRef.id, code: generatedCode };
-            } catch (e) {
-                console.error("Error al registrar usuario: ", e);
-                return null;
-            }
+                return { id: docRef.id };
+            } catch (e) { return null; }
         };
 
-        // 4. VERIFICAR CÓDIGO INGRESADO POR EL USUARIO
-        window.verifyUserCodeInCloud = async function(userId, ingresado) {
-            let pending = JSON.parse(localStorage.getItem('bidora_pending')) || [];
+        window.verifyCodeInCloud = async function(type, ingresado) {
+            let key = type === 'phone' ? 'bidora_pending_phones' : 'bidora_pending_emails';
+            let pending = JSON.parse(localStorage.getItem(key)) || [];
             const item = pending.find(p => p.code === ingresado);
-
             if (item) {
-                localStorage.setItem('bidora_active_badge', 'true');
                 pending = pending.filter(p => p.code !== ingresado);
-                localStorage.setItem('bidora_pending', JSON.stringify(pending));
+                localStorage.setItem(key, JSON.stringify(pending));
                 return true;
             }
             return false;
         };
 
-        // 5. INICIAR SESIÓN DESDE LA NUBE
         window.loginFromCloud = async function(user, pass) {
             if (user === 'yefermc' && pass === 'Raperodelbien1@') {
-                return { username: 'yefermc', verified: true, isAdmin: true, profilePic: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' };
+                return { username: 'yefermc', phoneVerified: true, emailVerified: true, isAdmin: true, isSuperAdmin: true, successfulTrades: 50, anonMode: false, profilePic: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' };
             }
-
             try {
                 const querySnapshot = await getDocs(collection(db, "usuarios"));
                 let foundUser = null;
-                querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    if (data.username === user && data.password === pass) {
-                        foundUser = data;
+                querySnapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    if ((data.username === user || data.email === user) && data.password === pass) {
+                        foundUser = { id: docSnap.id, ...data };
                     }
                 });
                 return foundUser;
-            } catch (e) {
-                console.error("Error en login: ", e);
-                return null;
-            }
+            } catch (e) { return null; }
         };
 
         window.addEventListener('DOMContentLoaded', () => {
-            if(typeof window.loadFirebaseAuctions === 'function') {
-                window.loadFirebaseAuctions();
-            }
+            if(typeof window.loadFirebaseAuctions === 'function') window.loadFirebaseAuctions();
         });
     </script>
 </head>
@@ -166,42 +143,61 @@
         </div>
     </header>
 
-    <!-- Barra de Administrador Jefe -->
+    <!-- Barra de Administrador -->
     <div id="adminToolbar" class="hidden bg-slate-900 text-white py-3 px-4 shadow-lg border-b-2 border-indigo-500">
         <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs sm:text-sm">
             <div class="flex items-center space-x-3">
-                <span class="bg-red-600 text-white px-2.5 py-1 rounded-md font-bold uppercase text-xs">Admin Jefe</span>
-                <span id="adminWelcomeText" class="text-indigo-200 font-semibold">Control Total Activo</span>
+                <span id="adminBadgeLabel" class="bg-red-600 text-white px-2.5 py-1 rounded-md font-bold uppercase text-xs">Admin Jefe</span>
+                <span class="text-indigo-200 font-semibold">Panel de Control Global</span>
             </div>
-            <div class="flex items-center gap-2">
-                <button onclick="openAdminVerificationPanel()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold flex items-center"><i class="fab fa-whatsapp mr-1.5"></i> Códigos de Usuarios (<span id="pendingBadge" class="ml-1 bg-white text-green-800 px-1.5 rounded-full text-xs font-bold">0</span>)</button>
-                <button onclick="openModal('auctionCreateModal')" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-plus-circle mr-1"></i> Publicar Subasta</button>
-                <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold">Salir</button>
+            <div class="flex items-center gap-2 flex-wrap">
+                <button onclick="openAdminVerificationPanel('phone')" class="bg-green-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fab fa-whatsapp mr-1"></i> Códigos Teléfono</button>
+                <button onclick="openAdminVerificationPanel('email')" class="bg-blue-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-envelope mr-1"></i> Códigos Correo</button>
+                <button onclick="openModal('settingsModal')" class="bg-gray-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-cog mr-1"></i> Ajustes</button>
+                <button onclick="openModal('auctionCreateModal')" class="bg-amber-500 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-plus-circle mr-1"></i> Publicar</button>
+                <button onclick="logout()" class="bg-red-500 text-white px-3 py-1.5 rounded-lg shadow font-semibold">Salir</button>
             </div>
         </div>
     </div>
 
-    <!-- Chat Interno de Administradores -->
-    <div id="adminChatWidget" class="hidden fixed bottom-4 left-4 z-50">
-        <div id="chatBox" class="hidden bg-white w-72 rounded-2xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col mb-2">
-            <div class="bg-slate-900 text-white px-4 py-2.5 flex justify-between items-center text-xs font-bold">
-                <span><i class="fas fa-comments text-indigo-400 mr-1.5"></i> Chat Interno de Admins</span>
-                <button onclick="toggleAdminChat()" class="text-gray-400 hover:text-white"><i class="fas fa-times"></i></button>
-            </div>
-            <div id="chatMessages" class="p-3 h-48 overflow-y-auto text-xs space-y-2 bg-gray-50">
-                <p class="text-gray-400 text-center italic">Canal seguro de comunicación interna.</p>
-            </div>
-            <div class="p-2 border-t border-gray-200 flex items-center space-x-2 bg-white">
-                <input type="text" id="chatInput" placeholder="Escribe un mensaje..." class="flex-1 border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none">
-                <button onclick="sendAdminChat()" class="bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs"><i class="fas fa-paper-plane"></i></button>
-            </div>
+    <!-- Modal de Advertencia Previa al Chat (Respeto) -->
+    <div id="chatWarningModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
+            <div class="bg-amber-100 text-amber-600 text-3xl w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"><i class="fas fa-handshake"></i></div>
+            <h3 class="text-base font-bold text-gray-900 mb-2">Normas de Convivencia</h3>
+            <p class="text-xs text-gray-600 mb-4 leading-relaxed">Por favor, mantén siempre el respeto mutuo durante la negociación. Cualquier falta de respeto o fraude será penalizado por la administración.</p>
+            <button onclick="enterActualChat()" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-xs mb-2">Entendido, ir al Chat</button>
+            <button onclick="closeModal('chatWarningModal')" class="w-full bg-gray-200 text-gray-700 font-semibold py-2 rounded-xl text-xs">Cancelar</button>
         </div>
-        <button onclick="toggleAdminChat()" class="bg-slate-900 text-white p-3.5 rounded-full shadow-2xl flex items-center justify-center transition hover:scale-105">
-            <i class="fas fa-headset text-lg"></i>
-        </button>
     </div>
 
-    <!-- Modal para Crear Subasta -->
+    <!-- Modal Ajustes de Cuenta (Modo Anónimo con explicación de 5 transacciones) -->
+    <div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-user-secret text-indigo-600 mr-2"></i> Configuración de Cuenta</h3>
+                <button onclick="closeModal('settingsModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="space-y-3 text-xs mb-4">
+                <p class="text-gray-500">Gestiona tus preferencias de visibilidad y anonimato.</p>
+                <div id="anonContainer" class="bg-gray-50 p-3 rounded-xl border">
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" id="toggleAnon" class="rounded text-indigo-600">
+                        <span class="font-bold">Activar Modo Anónimo en los chats</span>
+                    </label>
+                    <p class="text-[10px] text-gray-500 mt-1 leading-relaxed">
+                        ℹ️ <strong>¿Cómo desbloquear el modo anónimo?</strong> Debes completar al menos 5 compras o ventas finalizadas con éxito en la plataforma.
+                    </p>
+                    <p id="anonWarning" class="text-[10px] text-red-500 mt-1 hidden">⚠️ Aún no cumples con el requisito de las 5 transacciones exitosas.</p>
+                </div>
+            </div>
+            <div class="flex justify-end">
+                <button onclick="saveAccountSettings()" class="bg-indigo-600 text-white font-bold px-4 py-2 rounded-xl text-xs">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Crear Subasta (Permitir anónimos o no) -->
     <div id="auctionCreateModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <div class="flex justify-between items-center mb-4">
@@ -209,293 +205,207 @@
                 <button onclick="closeModal('auctionCreateModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
             <div class="space-y-3 mb-4 text-xs">
-                <input type="text" id="newAuctionTitle" placeholder="Título del producto (ej. Consola PS5)" class="w-full border border-gray-200 rounded-xl p-3 focus:outline-none">
-                <select id="newAuctionCategory" class="w-full border border-gray-200 rounded-xl p-3 bg-white focus:outline-none">
-                    <option value="Tecnología">Tecnología</option>
-                    <option value="Joyería">Joyería</option>
-                    <option value="Vehículos">Vehículos</option>
-                    <option value="Hogar">Hogar</option>
-                </select>
-                <input type="number" id="newAuctionPrice" placeholder="Precio inicial de puja" class="w-full border border-gray-200 rounded-xl p-3 focus:outline-none">
-                <div>
-                    <label class="block text-gray-500 mb-1 font-semibold">Foto del producto (desde tu equipo):</label>
-                    <input type="file" id="newAuctionImageFile" accept="image/*" class="w-full border border-gray-200 rounded-xl p-2 bg-gray-50 text-xs">
-                </div>
+                <input type="text" id="newAuctionTitle" placeholder="Título" class="w-full border p-3 rounded-xl">
+                <textarea id="newAuctionDesc" placeholder="Descripción..." class="w-full border p-3 rounded-xl resize-none h-20"></textarea>
+                <input type="text" id="newAuctionLocation" placeholder="Ubicación" class="w-full border p-3 rounded-xl">
+                <select id="newAuctionCategory" class="w-full border p-3 rounded-xl bg-white"><option value="Tecnología">Tecnología</option><option value="Vehículos">Vehículos</option></select>
+                <input type="number" id="newAuctionPrice" step="1000" min="1000" placeholder="Precio (Sube de 1.000 en 1.000)" class="w-full border p-3 rounded-xl">
+                
+                <label class="flex items-center space-x-2 pt-2">
+                    <input type="checkbox" id="allowAnonCheck" class="rounded text-indigo-600">
+                    <span class="font-semibold">¿Permitir compradores anónimos en esta subasta?</span>
+                </label>
+
+                <input type="file" id="newAuctionImageFile" accept="image/*" class="w-full border p-2 rounded-xl bg-gray-50 text-xs">
             </div>
             <div class="flex justify-end space-x-2">
                 <button onclick="closeModal('auctionCreateModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs">Cancelar</button>
-                <button onclick="handleAuctionImageUpload()" class="bg-amber-500 text-white font-bold px-4 py-2 rounded-xl text-xs">Publicar en la Nube</button>
+                <button onclick="handleAuctionPublish()" class="bg-amber-500 text-white font-bold px-4 py-2 rounded-xl text-xs">Publicar</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal de Verificación con Temporizador para el Usuario -->
+    <!-- Modales de verificación y Admin -->
     <div id="verifyModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
-            <div class="bg-indigo-100 text-indigo-600 text-3xl w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"><i class="fas fa-shield-alt"></i></div>
-            <h3 class="text-base font-bold text-gray-900 mb-1">Introduce tu código</h3>
-            <p class="text-xs text-gray-500 mb-4">Hemos generado tu código de verificación. Pídeselo al Administrador e ingrésalo aquí.</p>
-            
-            <input type="text" id="verifyInputCode" placeholder="Ej. 482910" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3 focus:outline-none">
-            <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3">Verificar Código</button>
-
-            <!-- Temporizador de 1 Minuto -->
-            <div class="text-xs text-gray-500">
-                <span id="timerText">Reenviar código en <strong id="countdown">60</strong>s</span>
-                <button id="resendBtn" onclick="resendCode()" class="hidden text-indigo-600 font-bold hover:underline">Reenviar código</button>
-            </div>
+            <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verifica tu Teléfono</h3>
+            <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
+            <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-xs">Verificar</button>
         </div>
     </div>
-
-    <!-- Modal de Códigos de WhatsApp para el Admin -->
     <div id="adminVerifModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-base font-bold text-gray-900"><i class="fab fa-whatsapp text-green-600 mr-2"></i> Códigos de Usuarios Pendientes</h3>
-                <button onclick="closeModal('adminVerifModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
-            </div>
-            <p class="text-xs text-gray-500 mb-3">Copia el código y mándaselo al usuario por WhatsApp:</p>
+            <h3 id="adminModalTitle" class="text-base font-bold text-gray-900 mb-4">Códigos Pendientes</h3>
             <div id="adminVerifList" class="space-y-2 max-h-48 overflow-y-auto mb-4 text-xs"></div>
-            <div class="flex justify-end">
-                <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs font-semibold">Cerrar</button>
-            </div>
+            <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs">Cerrar</button>
         </div>
     </div>
 
-    <!-- Contenido Principal -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <h1 class="text-xl font-bold text-gray-900 mb-6">Subastas Activas en la Nube</h1>
         <div id="auctionGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </main>
 
-    <!-- Modal Registro -->
+    <!-- Registro y Login -->
     <div id="registerModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Crear Cuenta en Bidora</h3>
-                <button onclick="closeModal('registerModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="space-y-3 mb-4 text-sm">
-                <input type="text" id="regFullName" placeholder="Nombre completo" class="w-full border p-3 rounded-xl focus:outline-none">
-                <input type="text" id="regUsername" placeholder="Nombre de usuario" class="w-full border p-3 rounded-xl focus:outline-none">
-                <input type="password" id="regPassword" placeholder="Contraseña" class="w-full border p-3 rounded-xl focus:outline-none">
-                <input type="tel" id="regPhone" placeholder="Número de WhatsApp (ej. 3001234567)" class="w-full border p-3 rounded-xl focus:outline-none">
-                <div>
-                    <label class="block text-gray-500 mb-1 text-xs font-semibold">Tu foto de perfil (desde tu equipo):</label>
-                    <input type="file" id="regProfilePicFile" accept="image/*" class="w-full border p-2 rounded-xl bg-gray-50 text-xs">
-                </div>
-            </div>
-            <button onclick="handleRegistrationUpload()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl text-sm">Registrarse</button>
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
+            <h3 class="text-lg font-bold">Crear Cuenta</h3>
+            <input type="text" id="regFullName" placeholder="Nombre completo" class="w-full border p-3 rounded-xl">
+            <input type="text" id="regUsername" placeholder="Usuario" class="w-full border p-3 rounded-xl">
+            <input type="email" id="regEmail" placeholder="Correo" class="w-full border p-3 rounded-xl">
+            <input type="password" id="regPassword" placeholder="Contraseña" class="w-full border p-3 rounded-xl">
+            <input type="tel" id="regPhone" placeholder="WhatsApp" class="w-full border p-3 rounded-xl">
+            <button onclick="handleRegistrationUpload()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Registrarse</button>
         </div>
     </div>
-
-    <!-- Modal Login -->
     <div id="loginModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Iniciar Sesión</h3>
-                <button onclick="closeModal('loginModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="space-y-3 mb-4 text-sm">
-                <input type="text" id="loginUser" placeholder="Usuario" class="w-full border p-3 rounded-xl focus:outline-none">
-                <input type="password" id="loginPass" placeholder="Contraseña" class="w-full border p-3 rounded-xl focus:outline-none">
-            </div>
-            <button onclick="handleLogin()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl text-sm">Entrar</button>
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
+            <h3 class="text-lg font-bold">Iniciar Sesión</h3>
+            <input type="text" id="loginUser" placeholder="Usuario o Correo" class="w-full border p-3 rounded-xl">
+            <input type="password" id="loginPass" placeholder="Contraseña" class="w-full border p-3 rounded-xl">
+            <button onclick="handleLogin()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Entrar</button>
         </div>
     </div>
 
-    <!-- Script de Control Principal -->
+    <!-- Script General -->
     <script>
-        let pendingVerifications = JSON.parse(localStorage.getItem('bidora_pending')) || [];
         let currentUserId = null;
-        let countdownInterval;
+        let verificationStep = 'phone';
 
         window.onload = function() {
             const activeUser = localStorage.getItem('bidora_active_user');
-            const activePic = localStorage.getItem('bidora_active_pic');
-            const isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
+            let isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
+            if (activeUser === 'yefermc') { isAdmin = true; }
 
             if (isAdmin) {
                 document.getElementById('adminToolbar').classList.remove('hidden');
-                document.getElementById('adminChatWidget').classList.remove('hidden');
-                document.getElementById('pendingBadge').innerText = pendingVerifications.length;
-                setAuthUI('yefermc', true, true, 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
+                setAuthUI(activeUser, true, true);
             } else if (activeUser) {
-                const isVerified = localStorage.getItem('bidora_active_badge') === 'true';
-                setAuthUI(activeUser, isVerified, false, activePic);
+                const phoneVer = localStorage.getItem('bidora_phone_verified') === 'true';
+                const emailVer = localStorage.getItem('bidora_email_verified') === 'true';
+                setAuthUI(activeUser, phoneVer && emailVer, false);
             }
         };
+
+        function preChatCheck(allowAnon) {
+            const isAnon = localStorage.getItem('bidora_anon_mode') === 'true';
+            if (isAnon && allowAnon !== 'true') {
+                alert('⚠️ Esta subasta no permite compradores anónimos.');
+                return;
+            }
+            openModal('chatWarningModal');
+        }
+
+        function enterActualChat() {
+            closeModal('chatWarningModal');
+            alert('¡Entrando a la sala de chat de la negociación!');
+        }
+
+        function saveAccountSettings() {
+            const trades = Number(localStorage.getItem('bidora_trades') || 0);
+            const wantAnon = document.getElementById('toggleAnon').checked;
+
+            if (wantAnon && trades < 5) {
+                document.getElementById('anonWarning').classList.remove('hidden');
+                return;
+            }
+
+            localStorage.setItem('bidora_anon_mode', wantAnon ? 'true' : 'false');
+            alert('¡Ajustes de cuenta guardados con éxito!');
+            closeModal('settingsModal');
+        }
+
+        function handleAuctionPublish() {
+            const title = document.getElementById('newAuctionTitle').value.trim();
+            const description = document.getElementById('newAuctionDesc').value.trim();
+            const location = document.getElementById('newAuctionLocation').value.trim();
+            const category = document.getElementById('newAuctionCategory').value;
+            const price = document.getElementById('newAuctionPrice').value;
+            const allowAnon = document.getElementById('allowAnonCheck').checked;
+            const fileInput = document.getElementById('newAuctionImageFile');
+
+            if (!title || !price) { alert('Completa título y precio.'); return; }
+
+            if (fileInput.files && fileInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) { window.saveAuctionToFirebase(title, category, price, description, location, allowAnon, e.target.result); };
+                reader.readAsDataURL(fileInput.files[0]);
+            } else { window.saveAuctionToFirebase(title, category, price, description, location, allowAnon, ''); }
+        }
 
         async function handleLogin() {
             const user = document.getElementById('loginUser').value.trim();
             const pass = document.getElementById('loginPass').value;
-
             const logged = await window.loginFromCloud(user, pass);
             if (logged) {
                 closeModal('loginModal');
-                if (logged.isAdmin) {
-                    localStorage.setItem('bidora_is_admin', 'true');
-                    document.getElementById('adminToolbar').classList.remove('hidden');
-                    document.getElementById('adminChatWidget').classList.remove('hidden');
-                }
                 localStorage.setItem('bidora_active_user', logged.username);
-                localStorage.setItem('bidora_active_pic', logged.profilePic);
-                localStorage.setItem('bidora_active_badge', logged.verified ? 'true' : 'false');
-                setAuthUI(logged.username, logged.verified, logged.isAdmin, logged.profilePic);
+                localStorage.setItem('bidora_phone_verified', logged.phoneVerified ? 'true' : 'false');
+                localStorage.setItem('bidora_email_verified', logged.emailVerified ? 'true' : 'false');
+                localStorage.setItem('bidora_trades', logged.successfulTrades || 0);
+                localStorage.setItem('bidora_anon_mode', logged.anonMode ? 'true' : 'false');
                 alert('¡Bienvenido!');
-            } else {
-                alert('Usuario o contraseña incorrectos.');
-            }
+                location.reload();
+            } else { alert('Credenciales incorrectas.'); }
         }
 
         function handleRegistrationUpload() {
             const fullName = document.getElementById('regFullName').value.trim();
             const username = document.getElementById('regUsername').value.trim();
+            const email = document.getElementById('regEmail').value.trim();
             const password = document.getElementById('regPassword').value;
             const phone = document.getElementById('regPhone').value.trim();
-            const fileInput = document.getElementById('regProfilePicFile');
 
-            if (!fullName || !username || !password || !phone) {
-                alert('Completa los campos obligatorios.');
-                return;
-            }
-
-            if (fileInput.files && fileInput.files[0]) {
-                const reader = new FileReader();
-                reader.onload = async function(e) {
-                    await executeCloudRegistration(fullName, username, password, phone, e.target.result);
-                };
-                reader.readAsDataURL(fileInput.files[0]);
-            } else {
-                executeCloudRegistration(fullName, username, password, phone, 'https://cdn-icons-png.flaticon.com/512/149/149071.png');
-            }
-        }
-
-        async function executeCloudRegistration(fullName, username, password, phone, profilePic) {
-            const res = await window.registerUserInCloud(fullName, username, password, phone, profilePic);
-            if (res) {
-                currentUserId = res.id;
-                closeModal('registerModal');
-                openModal('verifyModal');
-                startCountdown();
-
-                localStorage.setItem('bidora_active_user', username);
-                localStorage.setItem('bidora_active_pic', profilePic);
-                localStorage.setItem('bidora_active_badge', 'false');
-                setAuthUI(username, false, false, profilePic);
-            }
-        }
-
-        function startCountdown() {
-            let timeLeft = 60;
-            const countdownEl = document.getElementById('countdown');
-            const timerTextEl = document.getElementById('timerText');
-            const resendBtn = document.getElementById('resendBtn');
+            if (!fullName || !username || !email || !password || !phone) { alert('Completa los campos.'); return; }
             
-            resendBtn.classList.add('hidden');
-            timerTextEl.classList.remove('hidden');
-            countdownEl.innerText = timeLeft;
-
-            clearInterval(countdownInterval);
-            countdownInterval = setInterval(() => {
-                timeLeft--;
-                countdownEl.innerText = timeLeft;
-                if (timeLeft <= 0) {
-                    clearInterval(countdownInterval);
-                    timerTextEl.classList.add('hidden');
-                    resendBtn.classList.remove('hidden');
+            window.registerUserInCloud(fullName, username, email, password, phone, '').then(res => {
+                if(res) {
+                    currentUserId = res.id;
+                    closeModal('registerModal');
+                    openModal('verifyModal');
                 }
-            }, 1000);
-        }
-
-        function resendCode() {
-            alert('Nuevo código solicitado. Contacta al Administrador.');
-            startCountdown();
+            });
         }
 
         async function submitVerificationCode() {
             const codeInput = document.getElementById('verifyInputCode').value.trim();
-            const isValid = await window.verifyUserCodeInCloud(currentUserId, codeInput);
-
+            const isValid = await window.verifyCodeInCloud(verificationStep, codeInput);
             if (isValid) {
-                alert('¡Cuenta verificada con éxito!');
-                closeModal('verifyModal');
-                location.reload();
-            } else {
-                alert('Código incorrecto. Verifica el número que te envió el Administrador.');
-            }
+                if (verificationStep === 'phone') {
+                    verificationStep = 'email';
+                    document.getElementById('verifyInputCode').value = '';
+                    document.getElementById('verifyModalTitle').innerText = "Verifica tu Correo";
+                } else {
+                    closeModal('verifyModal');
+                    alert('¡Cuenta 100% verificada!');
+                    location.reload();
+                }
+            } else { alert('Código incorrecto.'); }
         }
 
-        function handleAuctionImageUpload() {
-            const title = document.getElementById('newAuctionTitle').value.trim();
-            const category = document.getElementById('newAuctionCategory').value;
-            const price = document.getElementById('newAuctionPrice').value.trim();
-            const fileInput = document.getElementById('newAuctionImageFile');
-
-            if (!title || !price) {
-                alert('Completa el título y el precio.');
-                return;
-            }
-
-            if (fileInput.files && fileInput.files[0]) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    window.saveAuctionToFirebase(title, category, price, e.target.result);
-                    closeModal('auctionCreateModal');
-                };
-                reader.readAsDataURL(fileInput.files[0]);
-            } else {
-                window.saveAuctionToFirebase(title, category, price, 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=500&q=80');
-                closeModal('auctionCreateModal');
-            }
-        }
-
-        function openAdminVerificationPanel() {
+        function openAdminVerificationPanel(type) {
+            verificationStep = type;
             const list = document.getElementById('adminVerifList');
             list.innerHTML = '';
-            pendingVerifications = JSON.parse(localStorage.getItem('bidora_pending')) || [];
-            
-            if (pendingVerifications.length === 0) {
-                list.innerHTML = '<p class="text-gray-400 text-center py-2">No hay códigos pendientes.</p>';
-            } else {
-                pendingVerifications.forEach(item => {
-                    list.innerHTML += `
-                        <div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center">
-                            <div>
-                                <span class="font-bold text-gray-800">User: ${item.user}</span><br>
-                                <span class="text-gray-500">Cel: ${item.phone}</span>
-                            </div>
-                            <span class="bg-green-100 text-green-700 px-3 py-1.5 rounded font-mono font-bold text-base shadow-sm">${item.code}</span>
-                        </div>
-                    `;
-                });
-            }
+            let key = type === 'phone' ? 'bidora_pending_phones' : 'bidora_pending_emails';
+            let pending = JSON.parse(localStorage.getItem(key)) || [];
+            pending.forEach(item => {
+                list.innerHTML += `<div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center"><span>${item.user}</span><strong class="text-indigo-600">${item.code}</strong></div>`;
+            });
             openModal('adminVerifModal');
         }
 
-        function toggleAdminChat() { 
-            document.getElementById('chatBox').classList.toggle('hidden'); 
-        }
+        function setAuthUI(username, fullyVerified, isAdmin) {
+            const isAnon = localStorage.getItem('bidora_anon_mode') === 'true';
+            const displayName = isAnon ? 'Anónimo 👤' : username;
+            const badgeStyle = fullyVerified ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700";
 
-        function sendAdminChat() {
-            const input = document.getElementById('chatInput');
-            if (input.value.trim()) {
-                document.getElementById('chatMessages').innerHTML += `<div class="bg-slate-100 p-2 rounded-lg text-slate-800"><strong>Tú:</strong> ${input.value}</div>`;
-                input.value = '';
-            }
-        }
-
-        function setAuthUI(username, verified, isAdmin, profilePic) {
-            const pic = profilePic || 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
-            const adminBadge = isAdmin ? '<span class="bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[10px] ml-1 font-bold">Admin</span>' : '';
-            const verifyBadge = verified ? '<i class="fas fa-check-circle text-blue-500 ml-1" title="Verificado"></i>' : '<span class="text-amber-500 text-[10px] ml-1 font-semibold">(Pendiente)</span>';
-            
             document.getElementById('authContainer').innerHTML = `
                 <div class="flex items-center space-x-2 mr-2">
-                    <img src="${pic}" alt="Perfil" class="w-8 h-8 rounded-full object-cover border border-indigo-500 shadow-sm">
-                    <span class="text-xs sm:text-sm font-semibold text-gray-700">Hola, ${username} ${verifyBadge} ${adminBadge}</span>
+                    <span class="text-sm font-semibold text-gray-800">${displayName}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded ${badgeStyle}">${fullyVerified ? '100% Verificado 🔵' : 'Estándar'}</span>
                 </div>
-                <button onclick="logout()" class="text-red-500 hover:text-red-700 text-xs font-semibold"><i class="fas fa-sign-out-alt"></i></button>
+                <button onclick="logout()" class="text-red-500 text-xs font-semibold">Salir</button>
             `;
         }
 
