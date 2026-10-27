@@ -69,6 +69,7 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
+        // REGISTRO EN LA NUBE (Firestore directo)
         window.registerUserInCloud = async function(fullName, username, email, password, phone, profilePic) {
             try {
                 const phoneCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -78,7 +79,8 @@
                     fullName, username, email, password, phone,
                     profilePic: profilePic || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
                     phoneCode, emailCode,
-                    phoneVerified: false, emailVerified: false,
+                    phoneVerified: false, 
+                    emailVerified: false,
                     isAdmin: false,
                     successfulTrades: 0,
                     anonMode: false,
@@ -86,27 +88,64 @@
                     createdAt: new Date()
                 });
 
-                let pendingPhones = JSON.parse(localStorage.getItem('bidora_pending_phones')) || [];
-                let pendingEmails = JSON.parse(localStorage.getItem('bidora_pending_emails')) || [];
-                pendingPhones.push({ id: docRef.id, user: username, phone, code: phoneCode });
-                pendingEmails.push({ id: docRef.id, user: username, email, code: emailCode });
-                localStorage.setItem('bidora_pending_phones', JSON.stringify(pendingPhones));
-                localStorage.setItem('bidora_pending_emails', JSON.stringify(pendingEmails));
-
+                localStorage.setItem('bidora_temp_reg_id', docRef.id);
                 return { id: docRef.id };
-            } catch (e) { return null; }
+            } catch (e) { 
+                console.error("Error en registro: ", e);
+                return null; 
+            }
         };
 
-        window.verifyCodeInCloud = async function(type, ingresado) {
-            let key = type === 'phone' ? 'bidora_pending_phones' : 'bidora_pending_emails';
-            let pending = JSON.parse(localStorage.getItem(key)) || [];
-            const item = pending.find(p => p.code === ingresado);
-            if (item) {
-                pending = pending.filter(p => p.code !== ingresado);
-                localStorage.setItem(key, JSON.stringify(pending));
-                return true;
+        // VERIFICAR CÓDIGO EN LA NUBE
+        window.verifyCodeInCloud = async function(userId, type, ingresado) {
+            try {
+                const querySnapshot = await getDocs(collection(db, "usuarios"));
+                let targetDocRef = null;
+                let userData = null;
+
+                querySnapshot.forEach((docSnap) => {
+                    if (docSnap.id === userId) {
+                        targetDocRef = doc(db, "usuarios", docSnap.id);
+                        userData = docSnap.data();
+                    }
+                });
+
+                if (!userData) return false;
+
+                if (type === 'phone' && userData.phoneCode === ingresado) {
+                    await updateDoc(targetDocRef, { phoneVerified: true });
+                    return true;
+                }
+                if (type === 'email' && userData.emailCode === ingresado) {
+                    await updateDoc(targetDocRef, { emailVerified: true });
+                    return true;
+                }
+                return false;
+            } catch (e) {
+                console.error("Error verificando código: ", e);
+                return false;
             }
-            return false;
+        };
+
+        // OBTENER TODOS LOS CÓDIGOS PENDIENTES DESDE FIRESTORE
+        window.getPendingCodesFromCloud = async function(type) {
+            try {
+                const querySnapshot = await getDocs(collection(db, "usuarios"));
+                let pendingList = [];
+                querySnapshot.forEach((docSnap) => {
+                    const data = docSnap.data();
+                    if (type === 'phone' && !data.phoneVerified) {
+                        pendingList.push({ user: data.username, phone: data.phone, code: data.phoneCode });
+                    }
+                    if (type === 'email' && !data.emailVerified) {
+                        pendingList.push({ user: data.username, email: data.email, code: data.emailCode });
+                    }
+                });
+                return pendingList;
+            } catch (e) {
+                console.error("Error obteniendo pendientes: ", e);
+                return [];
+            }
         };
 
         window.loginFromCloud = async function(user, pass) {
@@ -251,7 +290,7 @@
         <div id="auctionGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </main>
 
-    <!-- Modal de Registro (Actualizado: Número de teléfono) -->
+    <!-- Modal de Registro -->
     <div id="registerModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'registerModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
             <h3 class="text-lg font-bold">Crear Cuenta</h3>
@@ -286,9 +325,8 @@
         </div>
     </div>
 
-    <!-- Script General -->
+    <!-- Script General con Cloud unificado -->
     <script>
-        let currentUserId = null;
         let verificationStep = 'phone';
 
         window.onload = function() {
@@ -457,39 +495,63 @@
             
             window.registerUserInCloud(fullName, username, email, password, phone, '').then(res => {
                 if(res) {
-                    currentUserId = res.id;
+                    localStorage.setItem('bidora_temp_user_id', res.id);
+                    localStorage.setItem('bidora_active_user', username);
                     closeModal('registerModal');
                     openModal('verifyModal');
+                } else {
+                    alert('Error al registrar en la nube.');
                 }
             });
         }
 
         async function submitVerificationCode() {
             const codeInput = document.getElementById('verifyInputCode').value.trim();
-            const isValid = await window.verifyCodeInCloud(verificationStep, codeInput);
+            const userId = localStorage.getItem('bidora_temp_user_id');
+            
+            if(!codeInput) {
+                alert('Introduce el código.');
+                return;
+            }
+
+            const isValid = await window.verifyCodeInCloud(userId, verificationStep, codeInput);
             if (isValid) {
                 if (verificationStep === 'phone') {
+                    localStorage.setItem('bidora_phone_verified', 'true');
                     verificationStep = 'email';
                     document.getElementById('verifyInputCode').value = '';
                     document.getElementById('verifyModalTitle').innerText = "Verifica tu Correo";
+                    alert('¡Teléfono verificado! Ahora verifica tu correo.');
                 } else {
+                    localStorage.setItem('bidora_email_verified', 'true');
                     closeModal('verifyModal');
                     alert('¡Cuenta 100% verificada!');
                     location.reload();
                 }
-            } else { alert('Código incorrecto.'); }
+            } else { 
+                alert('Código incorrecto. Revisa el panel del administrador.'); 
+            }
         }
 
-        function openAdminVerificationPanel(type) {
+        async function openAdminVerificationPanel(type) {
             verificationStep = type;
             const list = document.getElementById('adminVerifList');
-            list.innerHTML = '';
-            let key = type === 'phone' ? 'bidora_pending_phones' : 'bidora_pending_emails';
-            let pending = JSON.parse(localStorage.getItem(key)) || [];
-            pending.forEach(item => {
-                list.innerHTML += `<div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center"><span>${item.user}</span><strong class="text-indigo-600">${item.code}</strong></div>`;
-            });
+            const titleEl = document.getElementById('adminModalTitle');
+            list.innerHTML = '<p class="text-center text-gray-400 py-2">Buscando en la nube...</p>';
             openModal('adminVerifModal');
+
+            titleEl.innerHTML = type === 'phone' ? 'Códigos Pendientes (Teléfono)' : 'Códigos Pendientes (Correo)';
+            
+            let pending = await window.getPendingCodesFromCloud(type);
+            list.innerHTML = '';
+
+            if (pending.length === 0) {
+                list.innerHTML = '<p class="text-gray-400 text-center py-2">No hay códigos pendientes.</p>';
+            } else {
+                pending.forEach(item => {
+                    list.innerHTML += `<div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center"><span>Usuario: <strong>${item.user}</strong></span><strong class="text-indigo-600 text-base">${item.code}</strong></div>`;
+                });
+            }
         }
 
         function logout() { 
