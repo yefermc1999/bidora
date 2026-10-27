@@ -33,7 +33,7 @@
                     seller: localStorage.getItem('bidora_active_user') || 'yefermc',
                     createdAt: new Date()
                 });
-                alert('¡Subasta publicada con éxito en la nube!');
+                alert('¡Subasta publicada con éxito!');
                 location.reload();
             } catch (e) { console.error("Error al publicar: ", e); }
         };
@@ -247,11 +247,11 @@
     </div>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <h1 class="text-xl font-bold text-gray-900 mb-6">Subastas Activas en la Nube</h1>
+        <h1 class="text-xl font-bold text-gray-900 mb-6">Subastas Activas</h1>
         <div id="auctionGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </main>
 
-    <!-- Modal de Registro -->
+    <!-- Modal de Registro (Actualizado: Número de teléfono) -->
     <div id="registerModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'registerModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
             <h3 class="text-lg font-bold">Crear Cuenta</h3>
@@ -264,7 +264,7 @@
                     <i id="eyeRegIcon" class="fas fa-eye"></i>
                 </button>
             </div>
-            <input type="tel" id="regPhone" placeholder="WhatsApp" class="w-full border p-3 rounded-xl">
+            <input type="tel" id="regPhone" placeholder="Número de teléfono" class="w-full border p-3 rounded-xl">
             <button onclick="handleRegistrationUpload()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Registrarse</button>
             <p class="text-center text-xs text-gray-500 pt-2">¿Ya tienes cuenta? <button onclick="switchToModal('loginModal')" class="text-indigo-600 font-bold hover:underline">Inicia sesión</button></p>
         </div>
@@ -286,7 +286,7 @@
         </div>
     </div>
 
-    <!-- Script General con Cloud y UI unificados -->
+    <!-- Script General -->
     <script>
         let currentUserId = null;
         let verificationStep = 'phone';
