@@ -138,13 +138,12 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <span class="text-2xl font-black text-indigo-600 tracking-wider">BIDORA</span>
             <div id="authContainer" class="flex items-center space-x-2 sm:space-x-3">
-                <button onclick="openModal('loginModal')" class="text-gray-700 hover:text-indigo-600 text-xs sm:text-sm font-semibold px-3 py-2 transition">Entrar</button>
-                <button onclick="openModal('registerModal')" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs sm:text-sm font-semibold px-3 py-2 rounded-full transition">Registrarse</button>
+                <!-- Se llena dinámicamente -->
             </div>
         </div>
     </header>
 
-    <!-- Barra de Administrador (Traducida al español y optimizada) -->
+    <!-- Barra de Administrador -->
     <div id="adminToolbar" class="hidden bg-slate-900 text-white py-3 px-4 shadow-lg border-b-2 border-indigo-500">
         <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs sm:text-sm">
             <div class="flex items-center space-x-3">
@@ -172,7 +171,7 @@
         </div>
     </div>
 
-    <!-- Modal Ajustes de Cuenta (Modo Anónimo + Cambio de Nombre mensual) -->
+    <!-- Modal Ajustes de Cuenta -->
     <div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <div class="flex justify-between items-center mb-4">
@@ -180,15 +179,12 @@
                 <button onclick="closeModal('settingsModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
             <div class="space-y-4 text-xs mb-4">
-                <!-- Cambio de Nombre (1 vez al mes) -->
                 <div class="bg-gray-50 p-3 rounded-xl border">
                     <label class="block font-bold mb-1">Cambiar Nombre de Usuario</label>
                     <input type="text" id="newUsernameInput" placeholder="Nuevo nombre de usuario" class="w-full border p-2 rounded-lg mb-1">
                     <p class="text-[10px] text-gray-500 mb-2">ℹ️ Solo puedes cambiar tu nombre de usuario <strong>1 vez al mes</strong>.</p>
                     <button onclick="changeUsername()" class="bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold">Actualizar Nombre</button>
                 </div>
-
-                <!-- Modo Anónimo -->
                 <div class="bg-gray-50 p-3 rounded-xl border">
                     <label class="flex items-center space-x-2">
                         <input type="checkbox" id="toggleAnon" class="rounded text-indigo-600">
@@ -276,31 +272,53 @@
         </div>
     </div>
 
-    <!-- Script General -->
+    <!-- Script General Corregido -->
     <script>
         let currentUserId = null;
         let verificationStep = 'phone';
 
         window.onload = function() {
-            const activeUser = localStorage.getItem('bidora_active_user') || 'Invitado';
+            const activeUser = localStorage.getItem('bidora_active_user');
             let isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
             if (activeUser === 'yefermc') { isAdmin = true; }
 
-            if (isAdmin) {
-                document.getElementById('adminToolbar').classList.remove('hidden');
-                setAuthUI(activeUser, true, true);
-            } else {
+            if (activeUser) {
+                if (isAdmin) {
+                    document.getElementById('adminToolbar').classList.remove('hidden');
+                }
                 const phoneVer = localStorage.getItem('bidora_phone_verified') === 'true';
                 const emailVer = localStorage.getItem('bidora_email_verified') === 'true';
-                setAuthUI(activeUser, phoneVer && emailVer, false);
+                setAuthUI(activeUser, phoneVer && emailVer, isAdmin);
+            } else {
+                setGuestUI();
             }
 
-            // Cargar estado de anónimo en ajustes si existe
             if(localStorage.getItem('bidora_anon_mode') === 'true') {
                 const toggle = document.getElementById('toggleAnon');
                 if(toggle) toggle.checked = true;
             }
         };
+
+        function setGuestUI() {
+            document.getElementById('authContainer').innerHTML = `
+                <button onclick="openModal('loginModal')" class="text-gray-700 hover:text-indigo-600 text-xs sm:text-sm font-semibold px-3 py-2 transition">Entrar</button>
+                <button onclick="openModal('registerModal')" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs sm:text-sm font-semibold px-3 py-2 rounded-full transition">Registrarse</button>
+            `;
+        }
+
+        function setAuthUI(username, fullyVerified, isAdmin) {
+            const isAnon = localStorage.getItem('bidora_anon_mode') === 'true';
+            const displayName = isAnon ? 'Anónimo 👤' : username;
+            const badgeStyle = fullyVerified ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700";
+
+            document.getElementById('authContainer').innerHTML = `
+                <div class="flex items-center space-x-2 mr-2">
+                    <span class="text-sm font-semibold text-gray-800">${displayName}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded ${badgeStyle}">${fullyVerified ? '100% Verificado 🔵' : 'Estándar'}</span>
+                </div>
+                <button onclick="logout()" class="text-red-500 text-xs font-semibold hover:underline">Salir</button>
+            `;
+        }
 
         function changeUsername() {
             const lastChange = localStorage.getItem('bidora_last_name_change');
@@ -382,6 +400,7 @@
                 localStorage.setItem('bidora_email_verified', logged.emailVerified ? 'true' : 'false');
                 localStorage.setItem('bidora_trades', logged.successfulTrades || 0);
                 localStorage.setItem('bidora_anon_mode', logged.anonMode ? 'true' : 'false');
+                if(logged.isAdmin) { localStorage.setItem('bidora_is_admin', 'true'); }
                 alert('¡Bienvenido!');
                 location.reload();
             } else { alert('Credenciales incorrectas.'); }
@@ -433,21 +452,11 @@
             openModal('adminVerifModal');
         }
 
-        function setAuthUI(username, fullyVerified, isAdmin) {
-            const isAnon = localStorage.getItem('bidora_anon_mode') === 'true';
-            const displayName = isAnon ? 'Anónimo 👤' : (username || 'Invitado');
-            const badgeStyle = fullyVerified ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700";
-
-            document.getElementById('authContainer').innerHTML = `
-                <div class="flex items-center space-x-2 mr-2">
-                    <span class="text-sm font-semibold text-gray-800">${displayName}</span>
-                    <span class="text-[10px] px-1.5 py-0.5 rounded ${badgeStyle}">${fullyVerified ? '100% Verificado 🔵' : 'Estándar'}</span>
-                </div>
-                <button onclick="logout()" class="text-red-500 text-xs font-semibold">Salir</button>
-            `;
+        function logout() { 
+            localStorage.clear(); 
+            location.reload(); 
         }
 
-        function logout() { localStorage.clear(); location.reload(); }
         function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
         function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
     </script>
