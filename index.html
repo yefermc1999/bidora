@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK -->
+    <!-- Firebase SDK y Funciones de Nube -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -270,7 +270,7 @@
         </div>
     </div>
 
-    <!-- Modal de Inicio de Sesión (Actualizado con mostrar contraseña y registro) -->
+    <!-- Modal de Inicio de Sesión -->
     <div id="loginModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'loginModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
             <h3 class="text-lg font-bold">Iniciar Sesión</h3>
@@ -286,7 +286,7 @@
         </div>
     </div>
 
-    <!-- Script General -->
+    <!-- Script General con Cloud y UI unificados -->
     <script>
         let currentUserId = null;
         let verificationStep = 'phone';
@@ -334,7 +334,6 @@
             `;
         }
 
-        // Función para mostrar u ocultar contraseña
         function togglePassword(fieldId, iconId) {
             const field = document.getElementById(fieldId);
             const icon = document.getElementById(iconId);
@@ -349,14 +348,12 @@
             }
         }
 
-        // Cambiar entre modales de manera fluida
         function switchToModal(targetId) {
             closeModal('loginModal');
             closeModal('registerModal');
             openModal(targetId);
         }
 
-        // Cerrar modal al hacer clic en el fondo oscuro
         function checkOutsideClose(event, modalId) {
             if (event.target.classList.contains('modal-backdrop')) {
                 closeModal(modalId);
@@ -450,7 +447,7 @@
         }
 
         function handleRegistrationUpload() {
-            const fullName = document.getElementById('regFullName'].value.trim();
+            const fullName = document.getElementById('regFullName').value.trim();
             const username = document.getElementById('regUsername').value.trim();
             const email = document.getElementById('regEmail').value.trim();
             const password = document.getElementById('regPassword').value;
