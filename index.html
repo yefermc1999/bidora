@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Sincronizada en la Nube -->
+    <!-- Firebase SDK y Lógica Sincronizada -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -72,13 +72,13 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
-        // Registro Oficial en la Nube de Firebase
+        // Registro de Usuario
         window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
             try {
                 const username = usernameInput.trim().toLowerCase();
                 const qUser = query(collection(db, "usuarios"), where("username", "==", username));
                 const userSnap = await getDocs(qUser);
-                if (!userSnap.empty) return { error: "Este usuario ya está siendo usado" };
+                if (!userSnap.empty) return { error: "Este usuario ya está en uso" };
                 
                 const phoneCode = String(Math.floor(100000 + Math.random() * 900000));
                 const emailCode = String(Math.floor(100000 + Math.random() * 900000));
@@ -93,53 +93,100 @@
                 const docRef = await addDoc(collection(db, "usuarios"), {
                     fullName, username, email, password, phone,
                     profilePic: profilePic || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
-                    phoneCode, emailCode, 
-                    phoneVerified: false, 
-                    emailVerified: false,
+                    phoneCode, emailCode, phoneVerified: false, emailVerified: false,
                     isAdmin, role, isFounder: true, successfulTrades: 0, anonMode: false, recoveryCode: "", createdAt: new Date()
                 });
 
+                // Registrar en la lista de pendientes local para el panel admin
+                let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
+                pendingList.push({
+                    id: docRef.id, username, phone, email, phoneCode, emailCode, phoneVerified: false, emailVerified: false
+                });
+                localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
+
                 localStorage.setItem('bidora_temp_reg_id', docRef.id);
+                localStorage.setItem('bidora_current_phone_code', phoneCode);
+                localStorage.setItem('bidora_current_email_code', emailCode);
+
                 return { id: docRef.id };
             } catch (e) { 
                 console.error("Error en registro:", e);
-                return { error: "Error de conexión con la base de datos." }; 
+                return { error: "Error de conexión: " + e.message }; 
             }
         };
 
+        // Verificación Automática al ingresar el código
         window.verifyCodeInCloud = async function(userId, type, ingresado) {
             try {
                 if(!userId) return false;
-                const userRef = doc(db, "usuarios", userId);
-                const docSnap = await getDoc(userRef);
-                if (!docSnap.exists()) return false;
-                const userData = docSnap.data();
-
                 const codeUser = String(ingresado).trim();
-                if (type === 'phone' && String(userData.phoneCode).trim() === codeUser) { 
-                    await updateDoc(userRef, { phoneVerified: true }); 
-                    return true; 
+                
+                const localPhone = localStorage.getItem('bidora_current_phone_code');
+                const localEmail = localStorage.getItem('bidora_current_email_code');
+
+                let match = false;
+                if (type === 'phone' && codeUser === localPhone) match = true;
+                if (type === 'email' && codeUser === localEmail) match = true;
+
+                if (!match) {
+                    const userRef = doc(db, "usuarios", userId);
+                    const docSnap = await getDoc(userRef);
+                    if (docSnap.exists()) {
+                        const userData = docSnap.data();
+                        if (type === 'phone' && String(userData.phoneCode).trim() === codeUser) match = true;
+                        if (type === 'email' && String(userData.emailCode).trim() === codeUser) match = true;
+                    }
                 }
-                if (type === 'email' && String(userData.emailCode).trim() === codeUser) { 
-                    await updateDoc(userRef, { emailVerified: true }); 
-                    return true; 
+
+                if (match) {
+                    try {
+                        const userRef = doc(db, "usuarios", userId);
+                        await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
+                    } catch(e) {}
+
+                    let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
+                    pendingList = pendingList.map(p => {
+                        if(p.id === userId) {
+                            if(type === 'phone') p.phoneVerified = true;
+                            if(type === 'email') p.emailVerified = true;
+                        }
+                        return p;
+                    });
+                    localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
                 }
-                return false;
+
+                return match;
             } catch (e) { return false; }
         };
 
+        // Reenviar código y actualizarlo para el Admin
         window.resendVerificationCodeInCloud = async function(userId, type) {
-            try {
-                const newCode = String(Math.floor(100000 + Math.random() * 900000));
-                if (!userId) return newCode;
-                const userRef = doc(db, "usuarios", String(userId).trim());
-                const docSnap = await getDoc(userRef);
-                if (docSnap.exists()) {
-                    if(type === 'phone') await updateDoc(userRef, { phoneCode: newCode }); 
-                    else await updateDoc(userRef, { emailCode: newCode }); 
+            const newCode = String(Math.floor(100000 + Math.random() * 900000));
+            if(type === 'phone') localStorage.setItem('bidora_current_phone_code', newCode);
+            else localStorage.setItem('bidora_current_email_code', newCode);
+
+            // Actualizar también en la lista de pendientes del panel de administrador
+            let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
+            pendingList = pendingList.map(p => {
+                if(p.id === userId) {
+                    if(type === 'phone') p.phoneCode = newCode;
+                    if(type === 'email') p.emailCode = newCode;
                 }
-                return newCode;
-            } catch(e) { return String(Math.floor(100000 + Math.random() * 900000)); }
+                return p;
+            });
+            localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
+
+            try {
+                if (userId) {
+                    const userRef = doc(db, "usuarios", String(userId).trim());
+                    const docSnap = await getDoc(userRef);
+                    if (docSnap.exists()) {
+                        if(type === 'phone') await updateDoc(userRef, { phoneCode: newCode }); 
+                        else await updateDoc(userRef, { emailCode: newCode }); 
+                    }
+                }
+            } catch(e) {}
+            return newCode;
         };
 
         window.loginFromCloud = async function(userInput, pass) {
@@ -195,8 +242,13 @@
 
         window.deleteUserRegistration = async function(userId, type) {
             try {
-                if(!userId) return;
-                await deleteDoc(doc(db, "usuarios", String(userId).trim()));
+                let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
+                pendingList = pendingList.filter(p => p.id !== userId);
+                localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
+
+                if(userId) {
+                    await deleteDoc(doc(db, "usuarios", String(userId).trim()));
+                }
                 alert("¡Registro eliminado con éxito!");
                 openAdminVerificationPanel(type);
             } catch (e) { alert("Error al eliminar."); }
@@ -204,33 +256,41 @@
 
         window.markAsVerifiedByAdmin = async function(userId, type) {
             try {
-                const userRef = doc(db, "usuarios", String(userId).trim());
-                await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
+                let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
+                pendingList = pendingList.map(p => {
+                    if(p.id === userId) {
+                        if(type === 'phone') p.phoneVerified = true;
+                        if(type === 'email') p.emailVerified = true;
+                    }
+                    return p;
+                });
+                localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
+
+                if(userId) {
+                    const userRef = doc(db, "usuarios", String(userId).trim());
+                    await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
+                }
                 alert("¡Verificado con éxito!");
                 openAdminVerificationPanel(type);
             } catch (e) { alert("Error al verificar."); }
         };
 
-        // Consulta Directa a Firebase para que funcione en cualquier dispositivo
         window.getPendingCodesFromCloud = async function(type) {
             try {
-                const snap = await getDocs(collection(db, "usuarios"));
-                let pending = [];
-                snap.forEach((d) => { 
-                    const data = d.data(); 
-                    const isPhonePending = type === 'phone' && data.phoneVerified === false;
-                    const isEmailPending = type === 'email' && data.emailVerified === false;
-                    
-                    if((isPhonePending || isEmailPending) && data.username) {
-                        pending.push({ 
-                            id: d.id, 
-                            username: data.username, 
-                            contact: type === 'phone' ? (data.phone || 'No registrado') : (data.email || 'No registrado'), 
-                            code: type === 'phone' ? (data.phoneCode || '123456') : (data.emailCode || '123456')
-                        }); 
+                let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
+                let results = [];
+                pendingList.forEach(item => {
+                    const isPhonePending = type === 'phone' && !item.phoneVerified;
+                    const isEmailPending = type === 'email' && !item.emailVerified;
+                    if(isPhonePending || isEmailPending) {
+                        results.push({
+                            id: item.id, username: item.username,
+                            contact: type === 'phone' ? item.phone : item.email,
+                            code: type === 'phone' ? item.phoneCode : item.emailCode
+                        });
                     }
                 });
-                return pending;
+                return results;
             } catch (e) { return []; }
         };
 
@@ -567,7 +627,7 @@
     <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verificación</h3>
-            <p class="text-xs text-gray-500 mb-4">Te enviaremos un código de 6 dígitos por WhatsApp o SMS. Ingrésalo aquí para activar tu cuenta.</p>
+            <p class="text-xs text-gray-500 mb-4">Ingresa el código de 6 dígitos para activar tu cuenta de inmediato.</p>
             <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
             <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Verificar</button>
             <div class="text-xs text-gray-500">
@@ -581,7 +641,7 @@
     <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <h3 id="adminModalTitle" class="text-base font-bold mb-2">Códigos</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Copia el mensaje y mándaselo al usuario por WhatsApp o SMS. Luego puedes aprobarlo o borrar el registro.</p>
+            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Lista de códigos pendientes.</p>
             <div id="adminVerifList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
             <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
         </div>
@@ -654,7 +714,7 @@
 
         window.copyAutoMessage = function(textToCopy) {
             navigator.clipboard.writeText(textToCopy).then(() => {
-                alert("📋 ¡Mensaje copiado al portapapeles! Ya puedes pegarlo en WhatsApp o SMS.");
+                alert("📋 ¡Mensaje copiado al portapapeles!");
             });
         };
 
@@ -682,7 +742,7 @@
             const userId = localStorage.getItem('bidora_temp_user_id');
             const newCode = await window.resendVerificationCodeInCloud(userId, verificationStep);
             if(newCode) {
-                alert(`¡Se ha solicitado un nuevo código! Te llegará por WhatsApp o SMS en breve.`);
+                alert(`¡Se ha generado un nuevo código y se ha enviado al panel de administración! Tu nuevo código es: ${newCode}`);
                 startCountdown();
             } else {
                 alert('Error al reenviar código.');
@@ -692,11 +752,11 @@
         async function openAdminStaffManagement() {
             openModal('adminStaffModal');
             const list = document.getElementById('adminStaffList');
-            list.innerHTML = '<p class="text-center text-gray-400">Cargando usuarios...</p>';
+            list.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
             const users = await window.getAllUsersForAdmin();
             list.innerHTML = '';
             if(users.length === 0) {
-                list.innerHTML = '<p class="text-center text-gray-400">No hay usuarios registrados.</p>';
+                list.innerHTML = '<p class="text-center text-gray-400">No hay usuarios.</p>';
                 return;
             }
             
@@ -883,11 +943,15 @@
                 localStorage.setItem('bidora_active_user', un.toLowerCase());
                 closeModal('registerModal'); 
                 verificationStep = 'phone'; 
+                
+                const phoneCodeShow = localStorage.getItem('bidora_current_phone_code');
+                alert(`¡Registro exitoso! Tu código de teléfono es: ${phoneCodeShow}`);
+
                 openModal('verifyModal');
                 document.getElementById('timerDisplay').classList.add('hidden');
                 document.getElementById('resendBtn').classList.remove('hidden');
             } else { 
-                alert('No se pudo registrar el usuario en la base de datos.'); 
+                alert('No se pudo registrar.'); 
             }
         }
 
@@ -895,21 +959,27 @@
             const code = document.getElementById('verifyInputCode').value.trim();
             const userId = localStorage.getItem('bidora_temp_user_id');
             const isValid = await window.verifyCodeInCloud(userId, verificationStep, code);
+            
             if (isValid) {
                 if (verificationStep === 'phone') {
                     localStorage.setItem('bidora_phone_verified', 'true'); 
                     verificationStep = 'email';
                     document.getElementById('verifyInputCode').value = ''; 
-                    alert('¡Teléfono verificado! Ahora verifica tu correo.');
+                    
+                    const emailCodeShow = localStorage.getItem('bidora_current_email_code');
+                    alert(`¡Teléfono verificado! Tu código de correo es: ${emailCodeShow}`);
+                    
                     document.getElementById('timerDisplay').classList.add('hidden');
                     document.getElementById('resendBtn').classList.remove('hidden');
                 } else {
                     localStorage.setItem('bidora_email_verified', 'true'); 
                     closeModal('verifyModal'); 
-                    alert('¡Cuenta 100% verificada!'); 
+                    alert('¡Cuenta 100% verificada automáticamente!'); 
                     location.reload();
                 }
-            } else { alert('Código incorrecto.'); }
+            } else { 
+                alert('Código incorrecto. Inténtalo de nuevo.'); 
+            }
         }
 
         async function openAdminVerificationPanel(type) {
@@ -926,9 +996,7 @@
 
             pending.forEach(i => {
                 const icon = type === 'phone' ? '<i class="fab fa-whatsapp text-green-500 mr-1"></i>' : '<i class="fas fa-envelope text-blue-500 mr-1"></i>';
-                const msgText = type === 'phone' 
-                    ? `¡Hola! Tu código de verificación para Bidora es: ${i.code}. No lo compartas con nadie.`
-                    : `¡Hola! Tu código de verificación de correo para Bidora es: ${i.code}. No lo compartas con nadie.`;
+                const msgText = `Tu código para Bidora es: ${i.code}`;
 
                 list.innerHTML += `
                     <div class="bg-gray-50 p-3 rounded-xl border flex flex-col gap-2 shadow-sm">
@@ -944,7 +1012,7 @@
                         </div>
                         <div class="flex items-center justify-between bg-white p-2 rounded-lg border">
                             <span class="font-bold text-gray-900 tracking-widest text-sm">${i.code}</span>
-                            <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar Mensaje</button>
+                            <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar</button>
                         </div>
                     </div>`;
             });
@@ -1009,7 +1077,7 @@
             const msgs = await window.getStaffChatMessages();
             container.innerHTML = '';
             if(msgs.length === 0) {
-                container.innerHTML = '<p class="text-center text-gray-400 py-4">No hay mensajes en el chat del staff.</p>';
+                container.innerHTML = '<p class="text-center text-gray-400 py-4">No hay mensajes.</p>';
                 return;
             }
             msgs.forEach(m => {
