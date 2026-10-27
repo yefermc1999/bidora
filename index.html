@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Completa con Temporizador Inteligente en Reenvío -->
+    <!-- Firebase SDK y Lógica Completa de Bidora -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -397,10 +397,6 @@
                 return { created, won, isFounder, role, history };
             } catch(e) { return { created: 0, won: 0, isFounder: false, role: '👤 Usuario Estándar', history: [] }; }
         };
-
-        window.addEventListener('DOMContentLoaded', () => {
-            if(typeof window.loadFirebaseAuctions === 'function') window.loadFirebaseAuctions();
-        });
     </script>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans">
@@ -592,7 +588,7 @@
         </div>
     </div>
 
-    <!-- Modal Verificación (Sin esperas iniciales, temporizador solo al pedir reenvío) -->
+    <!-- Modal Verificación -->
     <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verificación</h3>
@@ -631,7 +627,7 @@
         </div>
     </div>
 
-    <!-- Lógica de UI / Eventos -->
+    <!-- Lógica de UI / Eventos del Sistema -->
     <script>
         let verificationStep = 'phone';
         let countdownInterval = null;
@@ -639,18 +635,34 @@
         window.onload = function() {
             const activeUser = localStorage.getItem('bidora_active_user');
             let isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
-            if (activeUser === 'yefermc') { isAdmin = true; }
+            
+            if (activeUser === 'yefermc') { 
+                isAdmin = true; 
+                localStorage.setItem('bidora_is_admin', 'true');
+            }
+
             if (activeUser) {
-                if (isAdmin) { document.getElementById('adminToolbar').classList.remove('hidden'); }
+                if (isAdmin) { 
+                    document.getElementById('adminToolbar').classList.remove('hidden'); 
+                }
                 const phoneVer = localStorage.getItem('bidora_phone_verified') === 'true';
                 const emailVer = localStorage.getItem('bidora_email_verified') === 'true';
                 const isFounder = localStorage.getItem('bidora_is_founder') === 'true';
                 setAuthUI(activeUser, phoneVer && emailVer, isAdmin, isFounder);
-            } else { setGuestUI(); }
+            } else { 
+                setGuestUI(); 
+            }
+
+            if(typeof window.loadFirebaseAuctions === 'function') {
+                window.loadFirebaseAuctions();
+            }
         };
 
         function setGuestUI() {
-            document.getElementById('authContainer').innerHTML = `<button onclick="openModal('loginModal')" class="text-gray-700 hover:text-indigo-600 text-xs sm:text-sm font-semibold px-3 py-2">Entrar</button><button onclick="openModal('registerModal')" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs sm:text-sm font-semibold px-3 py-2 rounded-full">Registrarse</button>`;
+            document.getElementById('authContainer').innerHTML = `
+                <button onclick="openModal('loginModal')" class="text-gray-700 hover:text-indigo-600 text-xs sm:text-sm font-semibold px-3 py-2">Entrar</button>
+                <button onclick="openModal('registerModal')" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs sm:text-sm font-semibold px-3 py-2 rounded-full">Registrarse</button>
+            `;
         }
 
         function setAuthUI(username, fullyVerified, isAdmin, isFounder) {
@@ -696,7 +708,7 @@
             const newCode = await window.resendVerificationCodeInCloud(userId, verificationStep);
             if(newCode) {
                 alert(`¡Nuevo código generado para este usuario! Revísalo en tu panel de administrador.`);
-                startCountdown(); // Aquí sí arranca el contador de 60s tras solicitar un nuevo reenvío
+                startCountdown();
             } else {
                 alert('Error al reenviar código.');
             }
@@ -856,7 +868,8 @@
         };
 
         async function handleLogin() {
-            const user = document.getElementById('loginUser').value.trim(); const pass = document.getElementById('loginPass').value;
+            const user = document.getElementById('loginUser').value.trim(); 
+            const pass = document.getElementById('loginPass').value;
             const logged = await window.loginFromCloud(user, pass);
             if (logged) {
                 closeModal('loginModal');
@@ -865,21 +878,32 @@
                 localStorage.setItem('bidora_role', logged.role || '👤 Usuario Estándar');
                 localStorage.setItem('bidora_phone_verified', logged.phoneVerified ? 'true' : 'false'); 
                 localStorage.setItem('bidora_email_verified', logged.emailVerified ? 'true' : 'false');
-                if(logged.isAdmin) localStorage.setItem('bidora_is_admin', 'true');
-                alert('¡Bienvenido!'); location.reload();
-            } else { alert('Credenciales incorrectas.'); }
+                if(logged.isAdmin || logged.username === 'yefermc') {
+                    localStorage.setItem('bidora_is_admin', 'true');
+                }
+                alert('¡Bienvenido!'); 
+                location.reload();
+            } else { 
+                alert('Credenciales incorrectas.'); 
+            }
         }
 
         async function handleRegistrationUpload() {
-            const fn = document.getElementById('regFullName'].value.trim(), un = document.getElementById('regUsername').value.trim(), 
-                  em = document.getElementById('regEmail').value.trim(), pw = document.getElementById('regPassword').value, ph = document.getElementById('regPhone').value.trim();
+            const fn = document.getElementById('regFullName').value.trim();
+            const un = document.getElementById('regUsername').value.trim(); 
+            const em = document.getElementById('regEmail').value.trim(); 
+            const pw = document.getElementById('regPassword').value; 
+            const ph = document.getElementById('regPhone').value.trim();
+            
             if (!fn || !un || !em || !pw || !ph) { alert('Completa los campos.'); return; }
             const res = await window.registerUserInCloud(fn, un, em, pw, ph, '');
             if (res && res.error) { alert(res.error); return; }
             if(res && res.id) {
-                localStorage.setItem('bidora_temp_user_id', res.id); localStorage.setItem('bidora_active_user', un.toLowerCase());
-                closeModal('registerModal'); verificationStep = 'phone'; openModal('verifyModal');
-                // Al registrarse por primera vez, el botón de reenviar aparece limpio y sin temporizador
+                localStorage.setItem('bidora_temp_user_id', res.id); 
+                localStorage.setItem('bidora_active_user', un.toLowerCase());
+                closeModal('registerModal'); 
+                verificationStep = 'phone'; 
+                openModal('verifyModal');
                 document.getElementById('timerDisplay').classList.add('hidden');
                 document.getElementById('resendBtn').classList.remove('hidden');
             } else { alert('Error.'); }
@@ -891,12 +915,17 @@
             const isValid = await window.verifyCodeInCloud(userId, verificationStep, code);
             if (isValid) {
                 if (verificationStep === 'phone') {
-                    localStorage.setItem('bidora_phone_verified', 'true'); verificationStep = 'email';
-                    document.getElementById('verifyInputCode').value = ''; alert('¡Teléfono verificado! Ahora verifica tu correo.');
+                    localStorage.setItem('bidora_phone_verified', 'true'); 
+                    verificationStep = 'email';
+                    document.getElementById('verifyInputCode').value = ''; 
+                    alert('¡Teléfono verificado! Ahora verifica tu correo.');
                     document.getElementById('timerDisplay').classList.add('hidden');
                     document.getElementById('resendBtn').classList.remove('hidden');
                 } else {
-                    localStorage.setItem('bidora_email_verified', 'true'); closeModal('verifyModal'); alert('¡Cuenta 100% verificada!'); location.reload();
+                    localStorage.setItem('bidora_email_verified', 'true'); 
+                    closeModal('verifyModal'); 
+                    alert('¡Cuenta 100% verificada!'); 
+                    location.reload();
                 }
             } else { alert('Código incorrecto.'); }
         }
@@ -1015,7 +1044,8 @@
         }
 
         function handleAuctionPublish() {
-            const t = document.getElementById('newAuctionTitle'].value, p = document.getElementById('newAuctionPrice'].value;
+            const t = document.getElementById('newAuctionTitle').value;
+            const p = document.getElementById('newAuctionPrice').value;
             window.saveAuctionToFirebase(t, 'Tecnología', p, '', '', false, '');
         }
 
