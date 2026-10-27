@@ -82,6 +82,7 @@
                     isAdmin: false,
                     successfulTrades: 0,
                     anonMode: false,
+                    lastUsernameChange: null,
                     createdAt: new Date()
                 });
 
@@ -110,7 +111,7 @@
 
         window.loginFromCloud = async function(user, pass) {
             if (user === 'yefermc' && pass === 'Raperodelbien1@') {
-                return { username: 'yefermc', phoneVerified: true, emailVerified: true, isAdmin: true, isSuperAdmin: true, successfulTrades: 50, anonMode: false, profilePic: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' };
+                return { username: 'yefermc', phoneVerified: true, emailVerified: true, isAdmin: true, isSuperAdmin: true, successfulTrades: 50, anonMode: false, lastUsernameChange: null, profilePic: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' };
             }
             try {
                 const querySnapshot = await getDocs(collection(db, "usuarios"));
@@ -143,7 +144,7 @@
         </div>
     </header>
 
-    <!-- Barra de Administrador -->
+    <!-- Barra de Administrador (Traducida al español y optimizada) -->
     <div id="adminToolbar" class="hidden bg-slate-900 text-white py-3 px-4 shadow-lg border-b-2 border-indigo-500">
         <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs sm:text-sm">
             <div class="flex items-center space-x-3">
@@ -151,16 +152,16 @@
                 <span class="text-indigo-200 font-semibold">Panel de Control Global</span>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
-                <button onclick="openAdminVerificationPanel('phone')" class="bg-green-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fab fa-whatsapp mr-1"></i> Códigos Teléfono</button>
-                <button onclick="openAdminVerificationPanel('email')" class="bg-blue-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-envelope mr-1"></i> Códigos Correo</button>
-                <button onclick="openModal('settingsModal')" class="bg-gray-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-cog mr-1"></i> Ajustes</button>
-                <button onclick="openModal('auctionCreateModal')" class="bg-amber-500 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-plus-circle mr-1"></i> Publicar</button>
-                <button onclick="logout()" class="bg-red-500 text-white px-3 py-1.5 rounded-lg shadow font-semibold">Salir</button>
+                <button onclick="openAdminVerificationPanel('phone')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fab fa-whatsapp mr-1"></i> Códigos Teléfono</button>
+                <button onclick="openAdminVerificationPanel('email')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-envelope mr-1"></i> Códigos Correo</button>
+                <button onclick="openModal('settingsModal')" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-cog mr-1"></i> Ajustes</button>
+                <button onclick="openModal('auctionCreateModal')" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-plus-circle mr-1"></i> Publicar</button>
+                <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold">Salir</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal de Advertencia Previa al Chat (Respeto) -->
+    <!-- Modal de Advertencia Previa al Chat -->
     <div id="chatWarningModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <div class="bg-amber-100 text-amber-600 text-3xl w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"><i class="fas fa-handshake"></i></div>
@@ -171,22 +172,30 @@
         </div>
     </div>
 
-    <!-- Modal Ajustes de Cuenta (Modo Anónimo con explicación de 5 transacciones) -->
+    <!-- Modal Ajustes de Cuenta (Modo Anónimo + Cambio de Nombre mensual) -->
     <div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-user-secret text-indigo-600 mr-2"></i> Configuración de Cuenta</h3>
+                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-user-cog text-indigo-600 mr-2"></i> Configuración de Cuenta</h3>
                 <button onclick="closeModal('settingsModal')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
             </div>
-            <div class="space-y-3 text-xs mb-4">
-                <p class="text-gray-500">Gestiona tus preferencias de visibilidad y anonimato.</p>
-                <div id="anonContainer" class="bg-gray-50 p-3 rounded-xl border">
+            <div class="space-y-4 text-xs mb-4">
+                <!-- Cambio de Nombre (1 vez al mes) -->
+                <div class="bg-gray-50 p-3 rounded-xl border">
+                    <label class="block font-bold mb-1">Cambiar Nombre de Usuario</label>
+                    <input type="text" id="newUsernameInput" placeholder="Nuevo nombre de usuario" class="w-full border p-2 rounded-lg mb-1">
+                    <p class="text-[10px] text-gray-500 mb-2">ℹ️ Solo puedes cambiar tu nombre de usuario <strong>1 vez al mes</strong>.</p>
+                    <button onclick="changeUsername()" class="bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold">Actualizar Nombre</button>
+                </div>
+
+                <!-- Modo Anónimo -->
+                <div class="bg-gray-50 p-3 rounded-xl border">
                     <label class="flex items-center space-x-2">
                         <input type="checkbox" id="toggleAnon" class="rounded text-indigo-600">
                         <span class="font-bold">Activar Modo Anónimo en los chats</span>
                     </label>
                     <p class="text-[10px] text-gray-500 mt-1 leading-relaxed">
-                        ℹ️ <strong>¿Cómo desbloquear el modo anónimo?</strong> Debes completar al menos 5 compras o ventas finalizadas con éxito en la plataforma.
+                        ℹ️ <strong>¿Cómo desbloquear?</strong> Debes completar al menos 5 compras o ventas finalizadas con éxito.
                     </p>
                     <p id="anonWarning" class="text-[10px] text-red-500 mt-1 hidden">⚠️ Aún no cumples con el requisito de las 5 transacciones exitosas.</p>
                 </div>
@@ -197,7 +206,7 @@
         </div>
     </div>
 
-    <!-- Modal Crear Subasta (Permitir anónimos o no) -->
+    <!-- Modal Crear Subasta -->
     <div id="auctionCreateModal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <div class="flex justify-between items-center mb-4">
@@ -273,19 +282,47 @@
         let verificationStep = 'phone';
 
         window.onload = function() {
-            const activeUser = localStorage.getItem('bidora_active_user');
+            const activeUser = localStorage.getItem('bidora_active_user') || 'Invitado';
             let isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
             if (activeUser === 'yefermc') { isAdmin = true; }
 
             if (isAdmin) {
                 document.getElementById('adminToolbar').classList.remove('hidden');
                 setAuthUI(activeUser, true, true);
-            } else if (activeUser) {
+            } else {
                 const phoneVer = localStorage.getItem('bidora_phone_verified') === 'true';
                 const emailVer = localStorage.getItem('bidora_email_verified') === 'true';
                 setAuthUI(activeUser, phoneVer && emailVer, false);
             }
+
+            // Cargar estado de anónimo en ajustes si existe
+            if(localStorage.getItem('bidora_anon_mode') === 'true') {
+                const toggle = document.getElementById('toggleAnon');
+                if(toggle) toggle.checked = true;
+            }
         };
+
+        function changeUsername() {
+            const lastChange = localStorage.getItem('bidora_last_name_change');
+            const now = new Date().getTime();
+            const oneMonth = 30 * 24 * 60 * 60 * 1000;
+
+            if (lastChange && (now - lastChange < oneMonth)) {
+                alert('⚠️ Solo puedes cambiar tu nombre de usuario una vez al mes.');
+                return;
+            }
+
+            const newName = document.getElementById('newUsernameInput').value.trim();
+            if (!newName) {
+                alert('Por favor escribe un nuevo nombre.');
+                return;
+            }
+
+            localStorage.setItem('bidora_active_user', newName);
+            localStorage.setItem('bidora_last_name_change', now);
+            alert('¡Nombre de usuario actualizado con éxito!');
+            location.reload();
+        }
 
         function preChatCheck(allowAnon) {
             const isAnon = localStorage.getItem('bidora_anon_mode') === 'true';
@@ -311,8 +348,9 @@
             }
 
             localStorage.setItem('bidora_anon_mode', wantAnon ? 'true' : 'false');
-            alert('¡Ajustes de cuenta guardados con éxito!');
+            alert('¡Ajustes guardados con éxito!');
             closeModal('settingsModal');
+            location.reload();
         }
 
         function handleAuctionPublish() {
@@ -397,7 +435,7 @@
 
         function setAuthUI(username, fullyVerified, isAdmin) {
             const isAnon = localStorage.getItem('bidora_anon_mode') === 'true';
-            const displayName = isAnon ? 'Anónimo 👤' : username;
+            const displayName = isAnon ? 'Anónimo 👤' : (username || 'Invitado');
             const badgeStyle = fullyVerified ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700";
 
             document.getElementById('authContainer').innerHTML = `
