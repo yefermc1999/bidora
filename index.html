@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Sincronizada -->
+    <!-- Firebase SDK y Lógica Oculta de Verificación -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -72,7 +72,7 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
-        // Registro de Usuario
+        // Registro de Usuario (Códigos ocultos para el usuario, visibles solo para el Admin)
         window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
             try {
                 const username = usernameInput.trim().toLowerCase();
@@ -97,7 +97,7 @@
                     isAdmin, role, isFounder: true, successfulTrades: 0, anonMode: false, recoveryCode: "", createdAt: new Date()
                 });
 
-                // Registrar en la lista de pendientes local para el panel admin
+                // Registrar en la lista de pendientes local para garantizar que el panel admin los cargue al instante
                 let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
                 pendingList.push({
                     id: docRef.id, username, phone, email, phoneCode, emailCode, phoneVerified: false, emailVerified: false
@@ -115,7 +115,7 @@
             }
         };
 
-        // Verificación Automática al ingresar el código
+        // Verificación de Código ingresado por el usuario
         window.verifyCodeInCloud = async function(userId, type, ingresado) {
             try {
                 if(!userId) return false;
@@ -159,13 +159,12 @@
             } catch (e) { return false; }
         };
 
-        // Reenviar código y actualizarlo para el Admin
+        // Reenviar código sin mostrar alertas al usuario (va directo al panel del admin)
         window.resendVerificationCodeInCloud = async function(userId, type) {
             const newCode = String(Math.floor(100000 + Math.random() * 900000));
             if(type === 'phone') localStorage.setItem('bidora_current_phone_code', newCode);
             else localStorage.setItem('bidora_current_email_code', newCode);
 
-            // Actualizar también en la lista de pendientes del panel de administrador
             let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
             pendingList = pendingList.map(p => {
                 if(p.id === userId) {
@@ -627,7 +626,7 @@
     <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verificación</h3>
-            <p class="text-xs text-gray-500 mb-4">Ingresa el código de 6 dígitos para activar tu cuenta de inmediato.</p>
+            <p class="text-xs text-gray-500 mb-4">Te hemos enviado un código de 6 dígitos por WhatsApp o SMS. Ingrésalo aquí para continuar.</p>
             <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
             <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Verificar</button>
             <div class="text-xs text-gray-500">
@@ -742,7 +741,8 @@
             const userId = localStorage.getItem('bidora_temp_user_id');
             const newCode = await window.resendVerificationCodeInCloud(userId, verificationStep);
             if(newCode) {
-                alert(`¡Se ha generado un nuevo código y se ha enviado al panel de administración! Tu nuevo código es: ${newCode}`);
+                // Sin alerta al usuario: el código se envía calladamente al panel del admin
+                alert("¡Se ha solicitado un nuevo código! Te llegará por WhatsApp o SMS en breve.");
                 startCountdown();
             } else {
                 alert('Error al reenviar código.');
@@ -944,8 +944,8 @@
                 closeModal('registerModal'); 
                 verificationStep = 'phone'; 
                 
-                const phoneCodeShow = localStorage.getItem('bidora_current_phone_code');
-                alert(`¡Registro exitoso! Tu código de teléfono es: ${phoneCodeShow}`);
+                // Sin mostrar alertas al usuario; solo se le indica que revise su WhatsApp/SMS
+                alert("¡Registro exitoso! Te hemos enviado un código de verificación por WhatsApp o SMS.");
 
                 openModal('verifyModal');
                 document.getElementById('timerDisplay').classList.add('hidden');
@@ -966,8 +966,7 @@
                     verificationStep = 'email';
                     document.getElementById('verifyInputCode').value = ''; 
                     
-                    const emailCodeShow = localStorage.getItem('bidora_current_email_code');
-                    alert(`¡Teléfono verificado! Tu código de correo es: ${emailCodeShow}`);
+                    alert("¡Teléfono verificado con éxito! Ahora te hemos enviado el código de correo.");
                     
                     document.getElementById('timerDisplay').classList.add('hidden');
                     document.getElementById('resendBtn').classList.remove('hidden');
@@ -996,7 +995,9 @@
 
             pending.forEach(i => {
                 const icon = type === 'phone' ? '<i class="fab fa-whatsapp text-green-500 mr-1"></i>' : '<i class="fas fa-envelope text-blue-500 mr-1"></i>';
-                const msgText = `Tu código para Bidora es: ${i.code}`;
+                const msgText = type === 'phone' 
+                    ? `¡Hola! Tu código de verificación para Bidora es: ${i.code}. No lo compartas con nadie.`
+                    : `¡Hola! Tu código de verificación de correo para Bidora es: ${i.code}. No lo compartas con nadie.`;
 
                 list.innerHTML += `
                     <div class="bg-gray-50 p-3 rounded-xl border flex flex-col gap-2 shadow-sm">
@@ -1012,7 +1013,7 @@
                         </div>
                         <div class="flex items-center justify-between bg-white p-2 rounded-lg border">
                             <span class="font-bold text-gray-900 tracking-widest text-sm">${i.code}</span>
-                            <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar</button>
+                            <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar Mensaje</button>
                         </div>
                     </div>`;
             });
