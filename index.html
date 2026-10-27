@@ -136,14 +136,14 @@
             } catch (e) { return null; }
         };
 
-        // ====== SISTEMA DE RECUPERACIÓN DE CONTRASEÑA ======
+        // ====== SISTEMA DE RECUPERACIÓN DE CONTRASEÑA EN FLUJO CONTINUO ======
         window.requestPasswordResetCode = async function(usernameInput) {
             try {
                 const username = usernameInput.trim().toLowerCase();
                 const q = query(collection(db, "usuarios"), where("username", "==", username));
                 const snap = await getDocs(q);
                 
-                if (snap.empty) return false; 
+                if (snap.empty) return false; // Usuario no existe
                 
                 const userDoc = snap.docs[0];
                 const userData = userDoc.data();
@@ -152,6 +152,7 @@
 
                 await updateDoc(doc(db, "usuarios", userId), { recoveryCode: recoveryCode });
                 
+                // AHORA GUARDAMOS TAMBIÉN EL TELÉFONO DEL USUARIO EN LA BÓVEDA
                 await addDoc(collection(db, "recuperaciones"), { 
                     userId: userId, 
                     username: username, 
@@ -177,6 +178,7 @@
                 if (userData.recoveryCode === code) {
                     await updateDoc(doc(db, "usuarios", userDoc.id), { password: newPass, recoveryCode: null });
                     
+                    // Limpiar la solicitud del panel admin
                     const recQ = query(collection(db, "recuperaciones"), where("userId", "==", userDoc.id));
                     const recSnap = await getDocs(recQ);
                     recSnap.forEach(d => deleteDoc(doc(db, "recuperaciones", d.id)));
@@ -202,6 +204,7 @@
         };
         // =====================================================================
 
+        // EXTRACCIÓN DE CÓDIGOS PENDIENTES (AHORA INCLUYE TELÉFONO O CORREO)
         window.getPendingCodesFromCloud = async function(type) {
             try {
                 const snap = await getDocs(query(collection(db, "usuarios"), where(type === 'phone' ? 'phoneVerified' : 'emailVerified', "==", false)));
@@ -211,7 +214,7 @@
                     pending.push({ 
                         id: d.id, 
                         user: data.username, 
-                        contact: type === 'phone' ? data.phone : data.email, 
+                        contact: type === 'phone' ? data.phone : data.email, // Guarda explícitamente el teléfono o el correo
                         code: type === 'phone' ? data.phoneCode : data.emailCode 
                     }); 
                 });
@@ -325,13 +328,13 @@
         </div>
     </div>
 
-    <!-- Modal ADMIN: Solicitudes de Recuperación con Copiar Mensaje -->
+    <!-- Modal ADMIN: Solicitudes de Recuperación -->
     <div id="adminRecoveryModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminRecoveryModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
-            <h3 class="text-base font-bold text-gray-900 mb-2"><i class="fas fa-key text-indigo-600 mr-2"></i>Códigos de Recuperación</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Copia el mensaje automático y envíaselo al usuario por WhatsApp o SMS.</p>
-            <div id="adminRecoveryList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
-            <button onclick="closeModal('adminRecoveryModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
+            <h3 class="text-base font-bold text-gray-900 mb-4"><i class="fas fa-key text-indigo-600 mr-2"></i>Códigos de Recuperación</h3>
+            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Envíale este código al usuario por WhatsApp o SMS para que pueda cambiar su contraseña.</p>
+            <div id="adminRecoveryList" class="space-y-2 max-h-48 overflow-y-auto mb-4 text-xs"></div>
+            <button onclick="closeModal('adminRecoveryModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs font-bold">Cerrar</button>
         </div>
     </div>
 
@@ -372,13 +375,12 @@
         </div>
     </div>
 
-    <!-- Modal Verificación Admin con Copiar Mensaje -->
+    <!-- Modal Verificación Admin -->
     <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
-            <h3 id="adminModalTitle" class="text-base font-bold mb-2">Códigos</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Copia el mensaje y mándaselo al usuario. Luego puedes aprobarlo o borrar el registro.</p>
-            <div id="adminVerifList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
-            <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
+            <h3 id="adminModalTitle" class="text-base font-bold mb-4">Códigos</h3>
+            <div id="adminVerifList" class="space-y-2 max-h-48 overflow-y-auto mb-4 text-xs"></div>
+            <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs">Cerrar</button>
         </div>
     </div>
 
@@ -402,7 +404,7 @@
         let verificationStep = 'phone';
         window.onload = function() {
             const activeUser = localStorage.getItem('bidora_active_user');
-            let isAdmin = localStorage.getItem('bidora_is_admin'] === 'true';
+            let isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
             if (activeUser === 'yefermc') { isAdmin = true; }
             if (activeUser) {
                 if (isAdmin) { document.getElementById('adminToolbar').classList.remove('hidden'); }
@@ -430,16 +432,8 @@
         }
 
         // ========================================================
-        // FUNCIÓN ÚTIL PARA COPIAR MENSAJES AUTOMÁTICOS AL PORTAPAPELES
+        // LOGICA UI: RECUPERACIÓN FLUJO CONTINUO
         // ========================================================
-        window.copyAutoMessage = function(textToCopy) {
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                alert("📋 ¡Mensaje copiado al portapapeles! Ya puedes pegarlo en WhatsApp o SMS.");
-            }).catch(err => {
-                console.error('Error al copiar: ', err);
-            });
-        };
-
         async function handleRequestRecoveryCode() {
             const user = document.getElementById('recoveryUsername').value.trim();
             if(!user) { alert("Escribe tu nombre de usuario."); return; }
@@ -482,7 +476,7 @@
             document.getElementById('recoveryStep2').classList.add('hidden');
         }
 
-        // PANEL ADMIN RECUPERACIÓN CON BOTÓN DE COPIAR TEXTO
+        // SE MUESTRA EL TELÉFONO DEL USUARIO EN LA LISTA DE RECUPERACIÓN DEL ADMIN
         async function openAdminRecoveryPanel() {
             openModal('adminRecoveryModal');
             const list = document.getElementById('adminRecoveryList');
@@ -495,20 +489,14 @@
                 list.innerHTML = '<p class="text-center text-gray-400 py-2">No hay códigos pendientes.</p>';
             } else {
                 reqs.forEach(r => {
-                    const msgText = `¡Hola! Solicitaste restablecer tu contraseña en Bidora. Tu código secreto es: ${r.code}. No lo compartas.`;
                     list.innerHTML += `
-                        <div class="bg-gray-50 p-3 rounded-xl border flex flex-col gap-2 shadow-sm">
-                            <div class="flex justify-between items-center">
-                                <div>
-                                    <span class="block">User: <strong class="text-indigo-600">${r.username}</strong></span>
-                                    <span class="block text-[11px] text-gray-600"><i class="fab fa-whatsapp text-green-500 mr-1"></i> ${r.phone}</span>
-                                </div>
-                                <button onclick="eliminarSolicitudAdmin('${r.id}')" class="bg-red-500 hover:bg-red-600 text-white w-7 h-7 rounded-full font-bold shadow text-xs" title="Borrar"><i class="fas fa-times"></i></button>
+                        <div class="bg-gray-50 p-3 rounded-xl border flex justify-between items-center shadow-sm">
+                            <div>
+                                <span class="block mb-1">User: <strong class="text-indigo-600">${r.username}</strong></span>
+                                <span class="block text-[11px] text-gray-600 mb-1"><i class="fab fa-whatsapp text-green-500 mr-1"></i> ${r.phone}</span>
+                                Código: <strong class="text-lg text-gray-900 tracking-widest">${r.code}</strong>
                             </div>
-                            <div class="flex items-center justify-between bg-white p-2 rounded-lg border">
-                                <span class="font-bold text-gray-900 tracking-widest text-sm">${r.code}</span>
-                                <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar Mensaje</button>
-                            </div>
+                            <button onclick="eliminarSolicitudAdmin('${r.id}')" class="bg-red-500 hover:bg-red-600 text-white w-7 h-7 rounded-full font-bold shadow"><i class="fas fa-times"></i></button>
                         </div>
                     `;
                 });
@@ -519,10 +507,11 @@
             await window.deleteRecoveryRequest(id);
             openAdminRecoveryPanel();
         }
+        // ========================================================
 
         window.resumeVerification = function() {
-            if (localStorage.getItem('bidora_phone_verified'] !== 'true') { verificationStep = 'phone'; openModal('verifyModal'); } 
-            else if (localStorage.getItem('bidora_email_verified'] !== 'true') { verificationStep = 'email'; openModal('verifyModal'); }
+            if (localStorage.getItem('bidora_phone_verified') !== 'true') { verificationStep = 'phone'; openModal('verifyModal'); } 
+            else if (localStorage.getItem('bidora_email_verified') !== 'true') { verificationStep = 'email'; openModal('verifyModal'); }
         };
 
         async function handleLogin() {
@@ -563,35 +552,24 @@
             } else { alert('Código incorrecto.'); }
         }
 
-        // PANEL ADMIN VERIFICACIÓN TELÉFONO/CORREO CON BOTÓN DE COPIAR TEXTO
+        // SE MUESTRA EL TELÉFONO O CORREO DEL USUARIO EN LA LISTA DE VERIFICACIÓN DEL ADMIN
         async function openAdminVerificationPanel(type) {
             verificationStep = type;
-            const list = document.getElementById('adminVerifList'); 
-            document.getElementById('adminModalTitle').innerHTML = type === 'phone' ? 'Códigos Pendientes (Teléfono)' : 'Códigos Pendientes (Correo)';
-            list.innerHTML = 'Buscando...'; openModal('adminVerifModal');
+            const list = document.getElementById('adminVerifList'); list.innerHTML = 'Buscando...'; openModal('adminVerifModal');
             let pending = await window.getPendingCodesFromCloud(type); list.innerHTML = '';
             
             pending.forEach(i => {
                 const icon = type === 'phone' ? '<i class="fab fa-whatsapp text-green-500 mr-1"></i>' : '<i class="fas fa-envelope text-blue-500 mr-1"></i>';
-                const msgText = type === 'phone' 
-                    ? `¡Hola! Tu código de verificación para Bidora es: ${i.code}. No lo compartas con nadie.`
-                    : `¡Hola! Tu código de verificación de correo para Bidora es: ${i.code}. No lo compartas con nadie.`;
-
                 list.innerHTML += `
-                    <div class="bg-gray-50 p-3 rounded-xl border flex flex-col gap-2 shadow-sm">
-                        <div class="flex justify-between items-center">
-                            <div>
-                                <span class="block">User: <strong class="text-indigo-600">${i.user}</strong></span>
-                                <span class="block text-[11px] text-gray-600 font-semibold">${icon} ${i.contact}</span>
-                            </div>
-                            <div class="flex space-x-1">
-                                <button onclick="markAsVerifiedByAdmin('${i.id}', '${type}')" class="bg-green-500 hover:bg-green-600 text-white px-2.5 py-1 rounded text-[10px] font-bold" title="Aprobar directamete">✔</button>
-                                <button onclick="deleteUserRegistration('${i.id}', '${type}')" class="bg-red-500 hover:bg-red-600 text-white px-2.5 py-1 rounded text-[10px] font-bold" title="Eliminar registro">✖</button>
-                            </div>
+                    <div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center shadow-sm">
+                        <div>
+                            <span class="block mb-1">User: <strong>${i.user}</strong></span>
+                            <span class="block text-[11px] text-gray-600 mb-1 font-semibold">${icon} ${i.contact}</span>
+                            <strong class="text-indigo-600 tracking-widest">${i.code}</strong>
                         </div>
-                        <div class="flex items-center justify-between bg-white p-2 rounded-lg border">
-                            <span class="font-bold text-gray-900 tracking-widest text-sm">${i.code}</span>
-                            <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar Mensaje</button>
+                        <div class="flex space-x-1">
+                            <button onclick="markAsVerifiedByAdmin('${i.id}', '${type}')" class="bg-green-500 text-white px-2 py-1 rounded text-[10px] font-bold">✔</button>
+                            <button onclick="deleteUserRegistration('${i.id}', '${type}')" class="bg-red-500 text-white px-2 py-1 rounded text-[10px] font-bold">✖</button>
                         </div>
                     </div>`;
             });
