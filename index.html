@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Lógica Oculta de Verificación -->
+    <!-- Firebase SDK y Sincronización en la Nube -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -72,7 +72,7 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
-        // Registro de Usuario (Códigos ocultos para el usuario, visibles solo para el Admin)
+        // Registro de Usuario en la Nube
         window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
             try {
                 const username = usernameInput.trim().toLowerCase();
@@ -97,13 +97,6 @@
                     isAdmin, role, isFounder: true, successfulTrades: 0, anonMode: false, recoveryCode: "", createdAt: new Date()
                 });
 
-                // Registrar en la lista de pendientes local para garantizar que el panel admin los cargue al instante
-                let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
-                pendingList.push({
-                    id: docRef.id, username, phone, email, phoneCode, emailCode, phoneVerified: false, emailVerified: false
-                });
-                localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
-
                 localStorage.setItem('bidora_temp_reg_id', docRef.id);
                 localStorage.setItem('bidora_current_phone_code', phoneCode);
                 localStorage.setItem('bidora_current_email_code', emailCode);
@@ -121,68 +114,35 @@
                 if(!userId) return false;
                 const codeUser = String(ingresado).trim();
                 
-                const localPhone = localStorage.getItem('bidora_current_phone_code');
-                const localEmail = localStorage.getItem('bidora_current_email_code');
-
+                const userRef = doc(db, "usuarios", userId);
+                const docSnap = await getDoc(userRef);
                 let match = false;
-                if (type === 'phone' && codeUser === localPhone) match = true;
-                if (type === 'email' && codeUser === localEmail) match = true;
 
-                if (!match) {
-                    const userRef = doc(db, "usuarios", userId);
-                    const docSnap = await getDoc(userRef);
-                    if (docSnap.exists()) {
-                        const userData = docSnap.data();
-                        if (type === 'phone' && String(userData.phoneCode).trim() === codeUser) match = true;
-                        if (type === 'email' && String(userData.emailCode).trim() === codeUser) match = true;
-                    }
+                if (docSnap.exists()) {
+                    const userData = docSnap.data();
+                    if (type === 'phone' && String(userData.phoneCode).trim() === codeUser) match = true;
+                    if (type === 'email' && String(userData.emailCode).trim() === codeUser) match = true;
                 }
 
                 if (match) {
-                    try {
-                        const userRef = doc(db, "usuarios", userId);
-                        await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
-                    } catch(e) {}
-
-                    let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
-                    pendingList = pendingList.map(p => {
-                        if(p.id === userId) {
-                            if(type === 'phone') p.phoneVerified = true;
-                            if(type === 'email') p.emailVerified = true;
-                        }
-                        return p;
-                    });
-                    localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
+                    await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
                 }
 
                 return match;
             } catch (e) { return false; }
         };
 
-        // Reenviar código sin mostrar alertas al usuario (va directo al panel del admin)
+        // Reenviar código directamente a la nube para que llegue al panel
         window.resendVerificationCodeInCloud = async function(userId, type) {
             const newCode = String(Math.floor(100000 + Math.random() * 900000));
             if(type === 'phone') localStorage.setItem('bidora_current_phone_code', newCode);
             else localStorage.setItem('bidora_current_email_code', newCode);
 
-            let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
-            pendingList = pendingList.map(p => {
-                if(p.id === userId) {
-                    if(type === 'phone') p.phoneCode = newCode;
-                    if(type === 'email') p.emailCode = newCode;
-                }
-                return p;
-            });
-            localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
-
             try {
                 if (userId) {
                     const userRef = doc(db, "usuarios", String(userId).trim());
-                    const docSnap = await getDoc(userRef);
-                    if (docSnap.exists()) {
-                        if(type === 'phone') await updateDoc(userRef, { phoneCode: newCode }); 
-                        else await updateDoc(userRef, { emailCode: newCode }); 
-                    }
+                    if(type === 'phone') await updateDoc(userRef, { phoneCode: newCode }); 
+                    else await updateDoc(userRef, { emailCode: newCode }); 
                 }
             } catch(e) {}
             return newCode;
@@ -241,10 +201,6 @@
 
         window.deleteUserRegistration = async function(userId, type) {
             try {
-                let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
-                pendingList = pendingList.filter(p => p.id !== userId);
-                localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
-
                 if(userId) {
                     await deleteDoc(doc(db, "usuarios", String(userId).trim()));
                 }
@@ -255,16 +211,6 @@
 
         window.markAsVerifiedByAdmin = async function(userId, type) {
             try {
-                let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
-                pendingList = pendingList.map(p => {
-                    if(p.id === userId) {
-                        if(type === 'phone') p.phoneVerified = true;
-                        if(type === 'email') p.emailVerified = true;
-                    }
-                    return p;
-                });
-                localStorage.setItem('bidora_admin_pending_codes', JSON.stringify(pendingList));
-
                 if(userId) {
                     const userRef = doc(db, "usuarios", String(userId).trim());
                     await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
@@ -274,21 +220,27 @@
             } catch (e) { alert("Error al verificar."); }
         };
 
+        // Panel Admin: Lee los códigos pendientes directamente de Firebase (Sincronizado entre dispositivos)
         window.getPendingCodesFromCloud = async function(type) {
             try {
-                let pendingList = JSON.parse(localStorage.getItem('bidora_admin_pending_codes') || '[]');
                 let results = [];
-                pendingList.forEach(item => {
-                    const isPhonePending = type === 'phone' && !item.phoneVerified;
-                    const isEmailPending = type === 'email' && !item.emailVerified;
-                    if(isPhonePending || isEmailPending) {
-                        results.push({
-                            id: item.id, username: item.username,
-                            contact: type === 'phone' ? item.phone : item.email,
-                            code: type === 'phone' ? item.phoneCode : item.emailCode
-                        });
+                const snap = await getDocs(collection(db, "usuarios"));
+                
+                snap.forEach((d) => { 
+                    const data = d.data(); 
+                    const isPhonePending = type === 'phone' && (data.phoneVerified === false || data.phoneVerified === undefined);
+                    const isEmailPending = type === 'email' && (data.emailVerified === false || data.emailVerified === undefined);
+                    
+                    if((isPhonePending || isEmailPending) && data.username) {
+                        results.push({ 
+                            id: d.id, 
+                            username: data.username, 
+                            contact: type === 'phone' ? (data.phone || 'No registrado') : (data.email || 'No registrado'), 
+                            code: type === 'phone' ? (data.phoneCode || '123456') : (data.emailCode || '123456')
+                        }); 
                     }
                 });
+
                 return results;
             } catch (e) { return []; }
         };
@@ -640,7 +592,7 @@
     <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <h3 id="adminModalTitle" class="text-base font-bold mb-2">Códigos</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Lista de códigos pendientes.</p>
+            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Lista de códigos pendientes en la nube.</p>
             <div id="adminVerifList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
             <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
         </div>
@@ -741,7 +693,6 @@
             const userId = localStorage.getItem('bidora_temp_user_id');
             const newCode = await window.resendVerificationCodeInCloud(userId, verificationStep);
             if(newCode) {
-                // Sin alerta al usuario: el código se envía calladamente al panel del admin
                 alert("¡Se ha solicitado un nuevo código! Te llegará por WhatsApp o SMS en breve.");
                 startCountdown();
             } else {
@@ -944,7 +895,6 @@
                 closeModal('registerModal'); 
                 verificationStep = 'phone'; 
                 
-                // Sin mostrar alertas al usuario; solo se le indica que revise su WhatsApp/SMS
                 alert("¡Registro exitoso! Te hemos enviado un código de verificación por WhatsApp o SMS.");
 
                 openModal('verifyModal');
@@ -985,7 +935,7 @@
             verificationStep = type;
             const list = document.getElementById('adminVerifList'); 
             document.getElementById('adminModalTitle').innerHTML = type === 'phone' ? 'Códigos Pendientes (Teléfono)' : 'Códigos Pendientes (Correo)';
-            list.innerHTML = 'Buscando...'; openModal('adminVerifModal');
+            list.innerHTML = 'Buscando en la nube...'; openModal('adminVerifModal');
             let pending = await window.getPendingCodesFromCloud(type); list.innerHTML = '';
             
             if(pending.length === 0) {
