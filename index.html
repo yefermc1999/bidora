@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK (Optimizando con consultas directas "where") -->
+    <!-- Firebase SDK y Lógica Completa -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -25,6 +25,7 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
+        // 1. Subastas
         window.saveAuctionToFirebase = async function(title, category, price, description, location, allowAnon, image) {
             try {
                 const seller = localStorage.getItem('bidora_active_user') || 'yefermc';
@@ -42,6 +43,7 @@
                 const querySnapshot = await getDocs(collection(db, "subastas"));
                 const grid = document.getElementById('auctionGrid');
                 if(!grid) return;
+                grid.innerHTML = '';
                 
                 querySnapshot.forEach((docSnap) => {
                     const item = docSnap.data();
@@ -70,10 +72,10 @@
             } catch (e) { console.log("Error cargando subastas"); }
         };
 
+        // 2. Registro y Verificación (Optimizado con where)
         window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
             try {
                 const username = usernameInput.trim().toLowerCase();
-                
                 const qUser = query(collection(db, "usuarios"), where("username", "==", username));
                 if (!(await getDocs(qUser)).empty) return { errorField: 'username', error: "Este usuario ya está siendo usado" };
                 
@@ -107,7 +109,6 @@
                 if(!userId) return false;
                 const userRef = doc(db, "usuarios", userId);
                 const docSnap = await getDoc(userRef);
-
                 if (!docSnap.exists()) return false;
                 const userData = docSnap.data();
 
@@ -136,14 +137,13 @@
             } catch (e) { return null; }
         };
 
-        // ====== SISTEMA DE RECUPERACIÓN DE CONTRASEÑA EN FLUJO CONTINUO ======
+        // 3. Recuperación de Contraseña
         window.requestPasswordResetCode = async function(usernameInput) {
             try {
                 const username = usernameInput.trim().toLowerCase();
                 const q = query(collection(db, "usuarios"), where("username", "==", username));
                 const snap = await getDocs(q);
-                
-                if (snap.empty) return false; // Usuario no existe
+                if (snap.empty) return false; 
                 
                 const userDoc = snap.docs[0];
                 const userData = userDoc.data();
@@ -151,16 +151,10 @@
                 const recoveryCode = Math.floor(100000 + Math.random() * 900000).toString();
 
                 await updateDoc(doc(db, "usuarios", userId), { recoveryCode: recoveryCode });
-                
-                // AHORA GUARDAMOS TAMBIÉN EL TELÉFONO DEL USUARIO EN LA BÓVEDA
                 await addDoc(collection(db, "recuperaciones"), { 
-                    userId: userId, 
-                    username: username, 
-                    phone: userData.phone || 'No registrado',
-                    code: recoveryCode, 
-                    createdAt: new Date() 
+                    userId: userId, username: username, phone: userData.phone || 'No registrado',
+                    code: recoveryCode, createdAt: new Date() 
                 });
-                
                 return true;
             } catch(e) { return false; }
         };
@@ -170,19 +164,15 @@
                 const username = usernameInput.trim().toLowerCase();
                 const q = query(collection(db, "usuarios"), where("username", "==", username));
                 const snap = await getDocs(q);
-                
                 if (snap.empty) return { success: false, msg: "Usuario no existe." };
                 const userDoc = snap.docs[0];
                 const userData = userDoc.data();
 
                 if (userData.recoveryCode === code) {
                     await updateDoc(doc(db, "usuarios", userDoc.id), { password: newPass, recoveryCode: null });
-                    
-                    // Limpiar la solicitud del panel admin
                     const recQ = query(collection(db, "recuperaciones"), where("userId", "==", userDoc.id));
                     const recSnap = await getDocs(recQ);
                     recSnap.forEach(d => deleteDoc(doc(db, "recuperaciones", d.id)));
-
                     return { success: true };
                 } else {
                     return { success: false, msg: "Código incorrecto." };
@@ -202,9 +192,7 @@
         window.deleteRecoveryRequest = async function(id) {
             try { await deleteDoc(doc(db, "recuperaciones", id)); } catch(e) {}
         };
-        // =====================================================================
 
-        // EXTRACCIÓN DE CÓDIGOS PENDIENTES (AHORA INCLUYE TELÉFONO O CORREO)
         window.getPendingCodesFromCloud = async function(type) {
             try {
                 const snap = await getDocs(query(collection(db, "usuarios"), where(type === 'phone' ? 'phoneVerified' : 'emailVerified', "==", false)));
@@ -212,26 +200,13 @@
                 snap.forEach((d) => { 
                     const data = d.data(); 
                     pending.push({ 
-                        id: d.id, 
-                        user: data.username, 
-                        contact: type === 'phone' ? data.phone : data.email, // Guarda explícitamente el teléfono o el correo
+                        id: d.id, username: data.username, 
+                        contact: type === 'phone' ? data.phone : data.email, 
                         code: type === 'phone' ? data.phoneCode : data.emailCode 
                     }); 
                 });
                 return pending;
             } catch (e) { return []; }
-        };
-
-        window.getAllUsersForAdmin = async function() {
-            try {
-                const snap = await getDocs(collection(db, "usuarios"));
-                let verifiedActive = [];
-                snap.forEach((docSnap) => {
-                    const data = docSnap.data();
-                    if (data.phoneVerified && data.emailVerified) { verifiedActive.push({ id: docSnap.id, username: data.username, role: data.role || 'Usuario' }); }
-                });
-                return { verifiedActive };
-            } catch (e) { return { verifiedActive: [] }; }
         };
 
         window.markAsVerifiedByAdmin = async function(userId, type) {
@@ -245,19 +220,46 @@
             try { await deleteDoc(doc(db, "usuarios", userId)); alert("¡Registro eliminado!"); openAdminVerificationPanel(type); } catch (e) {}
         };
 
+        // 4. Chat Interno de Staff (Administradores)
+        window.getStaffChatMessages = async function() {
+            try {
+                const snap = await getDocs(query(collection(db, "staff_chat"), orderBy("createdAt", "asc")));
+                let m = []; snap.forEach(d => m.push(d.data())); return m;
+            } catch(e) { return []; }
+        };
+
+        window.sendStaffChatMessage = async function(message) {
+            try {
+                await addDoc(collection(db, "staff_chat"), {
+                    sender: localStorage.getItem('bidora_active_user') || 'Admin',
+                    role: localStorage.getItem('bidora_role') || 'Admin Jefe',
+                    message, createdAt: new Date()
+                });
+            } catch(e) {}
+        };
+
+        // 5. Perfil, Insignia de Fundador, Estadísticas e Historial de Compras/Ganadas
         window.getUserPublicStats = async function(username) {
             try {
                 const qAuct = await getDocs(collection(db, "subastas"));
                 let created = 0, won = 0;
-                qAuct.forEach(d => { if (d.data().seller === username) created++; if (d.data().winner === username) won++; });
+                let history = [];
+                qAuct.forEach(d => { 
+                    const item = d.data();
+                    if (item.seller === username) created++; 
+                    if (item.winner === username) {
+                        won++;
+                        history.push({ title: item.title, price: item.price, type: 'Ganada' });
+                    }
+                });
 
                 const qUser = query(collection(db, "usuarios"), where("username", "==", username));
                 const snapUser = await getDocs(qUser);
                 let isFounder = false, role = 'Usuario';
                 if(!snapUser.empty) { isFounder = snapUser.docs[0].data().isFounder; role = snapUser.docs[0].data().role || 'Usuario'; }
                 if (username === 'yefermc') { isFounder = true; role = 'Admin Jefe'; }
-                return { created, won, isFounder, role };
-            } catch(e) { return { created: 0, won: 0, isFounder: false, role: 'Usuario' }; }
+                return { created, won, isFounder, role, history };
+            } catch(e) { return { created: 0, won: 0, isFounder: false, role: 'Usuario', history: [] }; }
         };
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -267,20 +269,20 @@
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans">
 
-    <!-- Navbar -->
+    <!-- Navbar con Botón de Ayuda -->
     <header class="bg-white shadow-sm sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center space-x-4">
                 <span class="text-2xl font-black text-indigo-600 tracking-wider">BIDORA</span>
                 <div class="hidden sm:flex items-center space-x-3 text-xs">
-                    <button class="text-gray-600 font-semibold"><i class="fas fa-question-circle mr-1 text-indigo-500"></i> Ayuda</button>
+                    <button onclick="alert('Bienvenido a Bidora. Participa en subastas seguras y conéctate con confianza.')" class="text-gray-600 font-semibold hover:text-indigo-600 transition"><i class="fas fa-question-circle mr-1 text-indigo-500"></i> Ayuda</button>
                 </div>
             </div>
             <div id="authContainer" class="flex items-center space-x-2 sm:space-x-3"></div>
         </div>
     </header>
 
-    <!-- Panel Administrador -->
+    <!-- Panel Administrador Completo con Accesos -->
     <div id="adminToolbar" class="hidden bg-slate-900 text-white py-3 px-4 shadow-lg border-b-2 border-indigo-500">
         <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs sm:text-sm">
             <div class="flex items-center space-x-3">
@@ -290,6 +292,7 @@
                 <button onclick="openAdminVerificationPanel('phone')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fab fa-whatsapp mr-1"></i> Códigos Tel</button>
                 <button onclick="openAdminVerificationPanel('email')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-envelope mr-1"></i> Códigos Correo</button>
                 <button onclick="openAdminRecoveryPanel()" class="bg-indigo-800 hover:bg-indigo-900 text-white px-3 py-1.5 rounded-lg shadow font-semibold border border-indigo-500"><i class="fas fa-key mr-1"></i> Recuperar Pass</button>
+                <button onclick="openStaffChatModal()" class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-comments mr-1"></i> Staff Chat</button>
                 <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold">Salir</button>
             </div>
         </div>
@@ -303,18 +306,41 @@
         <div id="auctionGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </main>
 
-    <!-- Modal Recuperación Continua -->
+    <!-- Modal Perfil de Usuario con Placas, Estadísticas e Historial -->
+    <div id="userProfileModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'userProfileModal')">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-center text-gray-800 max-h-[90vh] overflow-y-auto">
+            <div class="w-20 h-20 bg-indigo-100 text-indigo-600 text-3xl font-bold rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner" id="profileAvatarLetter">U</div>
+            <h3 id="profileUsernameTitle" class="text-lg font-extrabold text-gray-900">Usuario</h3>
+            <p id="profileUserRole" class="text-xs text-indigo-600 font-semibold mb-3">Rol</p>
+            <div id="profileFounderBadge" class="mb-4"></div>
+            
+            <div class="grid grid-cols-2 gap-3 text-xs mb-4">
+                <div class="bg-gray-50 p-3 rounded-xl border shadow-sm"><span class="block text-gray-500 font-semibold">Subastas hechas</span><strong id="statAuctionsCreated" class="text-lg text-indigo-600">0</strong></div>
+                <div class="bg-gray-50 p-3 rounded-xl border shadow-sm"><span class="block text-gray-500 font-semibold">Subastas ganadas</span><strong id="statAuctionsWon" class="text-lg text-emerald-600">0</strong></div>
+            </div>
+
+            <!-- Historial de Compras / Ganadas -->
+            <div class="text-left mb-4">
+                <h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2"><i class="fas fa-history mr-1 text-indigo-500"></i> Historial de Compras / Ganadas</h4>
+                <div id="profilePurchaseHistory" class="bg-gray-50 rounded-xl p-3 border max-h-36 overflow-y-auto space-y-2 text-xs">
+                    <p class="text-center text-gray-400">Cargando historial...</p>
+                </div>
+            </div>
+
+            <button onclick="closeModal('userProfileModal')" class="w-full bg-gray-200 hover:bg-gray-300 font-bold py-2 rounded-xl text-xs transition">Cerrar</button>
+        </div>
+    </div>
+
+    <!-- Modal Recuperación de Contraseña Continua -->
     <div id="recoveryModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'recoveryModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
-            
             <div id="recoveryStep1">
                 <h3 class="text-lg font-bold text-gray-900 mb-2"><i class="fas fa-lock text-indigo-600 mr-2"></i>Recuperar Contraseña</h3>
                 <p class="text-xs text-gray-500 mb-4">Ingresa tu usuario para recibir un código de recuperación.</p>
                 <input type="text" id="recoveryUsername" placeholder="Tu nombre de usuario" class="w-full border p-3 rounded-xl text-sm mb-3">
-                <button onclick="handleRequestRecoveryCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3">Enviar Código por WhatsApp o SMS</button>
+                <button onclick="handleRequestRecoveryCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Enviar Código por WhatsApp o SMS</button>
                 <button onclick="switchToModal('loginModal')" class="text-gray-400 font-bold text-xs hover:underline block mx-auto mt-4">Cancelar</button>
             </div>
-
             <div id="recoveryStep2" class="hidden space-y-3">
                 <div class="bg-green-100 text-green-700 p-2.5 rounded-lg text-xs font-semibold mb-3">
                     <i class="fas fa-check-circle mr-1"></i> Te llegará un código de verificación por WhatsApp o SMS. No lo compartas.
@@ -322,19 +348,32 @@
                 <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-key text-emerald-500 mr-2"></i>Ingresa tu Código</h3>
                 <input type="text" id="recoveryCodeInput" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest">
                 <input type="password" id="recoveryNewPassword" placeholder="Crea una nueva contraseña" class="w-full border p-3 rounded-xl text-sm">
-                <button onclick="handleResetPasswordSubmit()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs">Guardar y Entrar</button>
+                <button onclick="handleResetPasswordSubmit()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs shadow">Guardar y Entrar</button>
                 <button onclick="cancelRecovery()" class="text-gray-400 font-bold text-xs hover:underline block mx-auto mt-2">Empezar de nuevo</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal ADMIN: Solicitudes de Recuperación -->
+    <!-- Modal ADMIN: Recuperación con Copiar Mensaje -->
     <div id="adminRecoveryModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminRecoveryModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
-            <h3 class="text-base font-bold text-gray-900 mb-4"><i class="fas fa-key text-indigo-600 mr-2"></i>Códigos de Recuperación</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Envíale este código al usuario por WhatsApp o SMS para que pueda cambiar su contraseña.</p>
-            <div id="adminRecoveryList" class="space-y-2 max-h-48 overflow-y-auto mb-4 text-xs"></div>
-            <button onclick="closeModal('adminRecoveryModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs font-bold">Cerrar</button>
+            <h3 class="text-base font-bold text-gray-900 mb-2"><i class="fas fa-key text-indigo-600 mr-2"></i>Códigos de Recuperación</h3>
+            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Copia el mensaje automático y envíaselo al usuario por WhatsApp o SMS.</p>
+            <div id="adminRecoveryList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
+            <button onclick="closeModal('adminRecoveryModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
+        </div>
+    </div>
+
+    <!-- Modal Chat Interno de Staff -->
+    <div id="staffChatModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'staffChatModal')">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl text-gray-800 flex flex-col h-[400px]">
+            <h3 class="text-base font-bold text-gray-900 mb-2"><i class="fas fa-comments text-pink-600 mr-2"></i>Chat Interno del Staff</h3>
+            <div id="staffChatMessagesContainer" class="flex-1 border rounded-xl p-3 overflow-y-auto space-y-2 mb-3 bg-gray-50 text-xs"></div>
+            <div class="flex gap-2">
+                <input type="text" id="staffMessageInput" placeholder="Escribe un mensaje para el staff..." class="flex-1 border p-2 rounded-xl text-xs">
+                <button onclick="handleSendStaffMessage()" class="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow">Enviar</button>
+            </div>
+            <button onclick="closeModal('staffChatModal')" class="mt-3 bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded-xl text-xs font-bold">Cerrar</button>
         </div>
     </div>
 
@@ -344,8 +383,7 @@
             <h3 class="text-lg font-bold">Iniciar Sesión</h3>
             <input type="text" id="loginUser" placeholder="Usuario o Correo" class="w-full border p-3 rounded-xl">
             <input type="password" id="loginPass" placeholder="Contraseña" class="w-full border p-3 rounded-xl">
-            <button onclick="handleLogin()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Entrar</button>
-            
+            <button onclick="handleLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl shadow">Entrar</button>
             <div class="flex justify-between items-center pt-2">
                 <button onclick="switchToModal('recoveryModal')" class="text-indigo-600 font-bold text-xs hover:underline">¿Olvidaste tu contraseña?</button>
                 <span class="text-xs text-gray-500">¿No tienes cuenta? <button onclick="switchToModal('registerModal')" class="text-indigo-600 font-bold hover:underline">Regístrate</button></span>
@@ -362,7 +400,7 @@
             <input type="email" id="regEmail" placeholder="Correo" class="w-full border p-3 rounded-xl">
             <input type="password" id="regPassword" placeholder="Contraseña" class="w-full border p-3 rounded-xl">
             <input type="tel" id="regPhone" placeholder="Teléfono" class="w-full border p-3 rounded-xl">
-            <button onclick="handleRegistrationUpload()" class="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl">Registrarse</button>
+            <button onclick="handleRegistrationUpload()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl shadow">Registrarse</button>
         </div>
     </div>
 
@@ -371,16 +409,17 @@
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verificación</h3>
             <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
-            <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-xs mb-3">Verificar</button>
+            <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Verificar</button>
         </div>
     </div>
 
-    <!-- Modal Verificación Admin -->
+    <!-- Modal Verificación Admin con Copiar Mensaje -->
     <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
-            <h3 id="adminModalTitle" class="text-base font-bold mb-4">Códigos</h3>
-            <div id="adminVerifList" class="space-y-2 max-h-48 overflow-y-auto mb-4 text-xs"></div>
-            <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs">Cerrar</button>
+            <h3 id="adminModalTitle" class="text-base font-bold mb-2">Códigos</h3>
+            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Copia el mensaje y mándaselo al usuario. Luego puedes aprobarlo o borrar el registro.</p>
+            <div id="adminVerifList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
+            <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
         </div>
     </div>
 
@@ -393,8 +432,8 @@
                 <input type="number" id="newAuctionPrice" placeholder="Precio" class="w-full border p-3 rounded-xl">
             </div>
             <div class="flex justify-end space-x-2">
-                <button onclick="closeModal('auctionCreateModal')" class="bg-gray-200 px-4 py-2 rounded-xl text-xs">Cancelar</button>
-                <button onclick="handleAuctionPublish()" class="bg-amber-500 text-white font-bold px-4 py-2 rounded-xl text-xs">Publicar</button>
+                <button onclick="closeModal('auctionCreateModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs">Cancelar</button>
+                <button onclick="handleAuctionPublish()" class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-xl text-xs shadow">Publicar</button>
             </div>
         </div>
     </div>
@@ -424,34 +463,71 @@
             const badgeText = fullyVerified ? '100% Verificado' : '⚠️ Faltan Verificar (Click)';
             document.getElementById('authContainer').innerHTML = `
                 <div class="flex items-center space-x-2 mr-2">
-                    <span class="text-sm font-semibold text-gray-800">${username}</span>
+                    <span class="text-sm font-semibold text-gray-800 cursor-pointer hover:text-indigo-600" onclick="openUserProfile('${username}')">${username}</span>
                     <span ${fullyVerified?'':`onclick="resumeVerification()"`} class="text-[10px] px-1.5 py-0.5 rounded ${badgeStyle}">${badgeText}</span>
                 </div>
                 <button onclick="logout()" class="text-red-500 text-xs font-semibold hover:underline">Salir</button>
             `;
         }
 
-        // ========================================================
-        // LOGICA UI: RECUPERACIÓN FLUJO CONTINUO
-        // ========================================================
+        window.copyAutoMessage = function(textToCopy) {
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                alert("📋 ¡Mensaje copiado al portapapeles! Ya puedes pegarlo en WhatsApp o SMS.");
+            }).catch(err => { console.error('Error al copiar: ', err); });
+        };
+
+        // Abrir Perfil de Usuario con Placas, Estadísticas e Historial
+        async function openUserProfile(username) {
+            if(!username) return; openModal('userProfileModal');
+            document.getElementById('profileUsernameTitle').innerText = username;
+            document.getElementById('profileAvatarLetter').innerText = username.charAt(0).toUpperCase();
+            document.getElementById('statAuctionsCreated').innerText = '...';
+            document.getElementById('statAuctionsWon').innerText = '...';
+            document.getElementById('profileFounderBadge').innerHTML = '';
+            document.getElementById('profilePurchaseHistory').innerHTML = '<p class="text-center text-gray-400">Cargando historial...</p>';
+
+            const stats = await window.getUserPublicStats(username);
+            document.getElementById('profileUserRole').innerText = `Rango: ${stats.role}`;
+            document.getElementById('statAuctionsCreated').innerText = stats.created;
+            document.getElementById('statAuctionsWon').innerText = stats.won;
+            
+            if(stats.isFounder) {
+                document.getElementById('profileFounderBadge').innerHTML = '<span class="bg-amber-500 text-white text-xs px-3 py-1 rounded-full font-bold shadow-sm">👑 Miembro Fundador</span>';
+            }
+
+            const historyContainer = document.getElementById('profilePurchaseHistory');
+            historyContainer.innerHTML = '';
+            if(!stats.history || stats.history.length === 0) {
+                historyContainer.innerHTML = '<p class="text-center text-gray-400 py-2">No hay compras o subastas ganadas aún.</p>';
+            } else {
+                stats.history.forEach(h => {
+                    historyContainer.innerHTML += `
+                        <div class="bg-white p-2 rounded-lg border flex justify-between items-center shadow-xs">
+                            <div>
+                                <span class="font-bold text-gray-900 block">${h.title}</span>
+                                <span class="text-[10px] text-emerald-600 font-semibold">Subasta Ganada</span>
+                            </div>
+                            <span class="font-bold text-indigo-600">$${Number(h.price).toLocaleString()}</span>
+                        </div>
+                    `;
+                });
+            }
+        }
+
         async function handleRequestRecoveryCode() {
             const user = document.getElementById('recoveryUsername').value.trim();
             if(!user) { alert("Escribe tu nombre de usuario."); return; }
-            
             const req = await window.requestPasswordResetCode(user);
             if(req) {
                 document.getElementById('recoveryStep1').classList.add('hidden');
                 document.getElementById('recoveryStep2').classList.remove('hidden');
-            } else {
-                alert("El usuario no existe en la base de datos.");
-            }
+            } else { alert("El usuario no existe en la base de datos."); }
         }
 
         async function handleResetPasswordSubmit() {
             const user = document.getElementById('recoveryUsername').value.trim();
             const code = document.getElementById('recoveryCodeInput').value.trim();
             const newPass = document.getElementById('recoveryNewPassword').value.trim();
-            
             if(!code || !newPass) { alert("Completa todos los campos."); return; }
             if(newPass.length < 6) { alert("La nueva contraseña debe tener al menos 6 caracteres."); return; }
 
@@ -460,12 +536,8 @@
                 alert("¡Contraseña actualizada! Entrando a tu cuenta...");
                 document.getElementById('loginUser').value = user;
                 document.getElementById('loginPass').value = newPass;
-                cancelRecovery(); 
-                switchToModal('loginModal');
-                handleLogin(); 
-            } else {
-                alert(res.msg); 
-            }
+                cancelRecovery(); switchToModal('loginModal'); handleLogin(); 
+            } else { alert(res.msg); }
         }
 
         function cancelRecovery() {
@@ -476,27 +548,30 @@
             document.getElementById('recoveryStep2').classList.add('hidden');
         }
 
-        // SE MUESTRA EL TELÉFONO DEL USUARIO EN LA LISTA DE RECUPERACIÓN DEL ADMIN
         async function openAdminRecoveryPanel() {
             openModal('adminRecoveryModal');
             const list = document.getElementById('adminRecoveryList');
             list.innerHTML = '<p class="text-center text-gray-400 py-2">Buscando códigos...</p>';
-            
             const reqs = await window.getRecoveryRequestsForAdmin();
             list.innerHTML = '';
-            
             if(reqs.length === 0) {
                 list.innerHTML = '<p class="text-center text-gray-400 py-2">No hay códigos pendientes.</p>';
             } else {
                 reqs.forEach(r => {
+                    const msgText = `¡Hola! Solicitaste restablecer tu contraseña en Bidora. Tu código secreto es: ${r.code}. No lo compartas.`;
                     list.innerHTML += `
-                        <div class="bg-gray-50 p-3 rounded-xl border flex justify-between items-center shadow-sm">
-                            <div>
-                                <span class="block mb-1">User: <strong class="text-indigo-600">${r.username}</strong></span>
-                                <span class="block text-[11px] text-gray-600 mb-1"><i class="fab fa-whatsapp text-green-500 mr-1"></i> ${r.phone}</span>
-                                Código: <strong class="text-lg text-gray-900 tracking-widest">${r.code}</strong>
+                        <div class="bg-gray-50 p-3 rounded-xl border flex flex-col gap-2 shadow-sm">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <span class="block">User: <strong class="text-indigo-600">${r.username}</strong></span>
+                                    <span class="block text-[11px] text-gray-600"><i class="fab fa-whatsapp text-green-500 mr-1"></i> ${r.phone}</span>
+                                </div>
+                                <button onclick="eliminarSolicitudAdmin('${r.id}')" class="bg-red-500 hover:bg-red-600 text-white w-7 h-7 rounded-full font-bold shadow text-xs" title="Borrar"><i class="fas fa-times"></i></button>
                             </div>
-                            <button onclick="eliminarSolicitudAdmin('${r.id}')" class="bg-red-500 hover:bg-red-600 text-white w-7 h-7 rounded-full font-bold shadow"><i class="fas fa-times"></i></button>
+                            <div class="flex items-center justify-between bg-white p-2 rounded-lg border">
+                                <span class="font-bold text-gray-900 tracking-widest text-sm">${r.code}</span>
+                                <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar Mensaje</button>
+                            </div>
                         </div>
                     `;
                 });
@@ -507,7 +582,43 @@
             await window.deleteRecoveryRequest(id);
             openAdminRecoveryPanel();
         }
-        // ========================================================
+
+        // Chat Interno de Staff
+        async function openStaffChatModal() {
+            openModal('staffChatModal');
+            await loadStaffMessages();
+        }
+
+        async function loadStaffMessages() {
+            const container = document.getElementById('staffChatMessagesContainer');
+            container.innerHTML = '<p class="text-center text-gray-400">Cargando chat...</p>';
+            const messages = await window.getStaffChatMessages();
+            container.innerHTML = '';
+            if(messages.length === 0) {
+                container.innerHTML = '<p class="text-center text-gray-400">No hay mensajes en el chat de staff.</p>';
+                return;
+            }
+            messages.forEach(m => {
+                container.innerHTML += `
+                    <div class="bg-white p-2 rounded-lg border shadow-sm">
+                        <div class="flex justify-between text-[10px] text-gray-500 font-semibold mb-1">
+                            <span class="text-indigo-600">${m.sender} (${m.role})</span>
+                        </div>
+                        <p class="text-gray-800 text-xs">${m.message}</p>
+                    </div>
+                `;
+            });
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function handleSendStaffMessage() {
+            const input = document.getElementById('staffMessageInput');
+            const msg = input.value.trim();
+            if(!msg) return;
+            await window.sendStaffChatMessage(msg);
+            input.value = '';
+            await loadStaffMessages();
+        }
 
         window.resumeVerification = function() {
             if (localStorage.getItem('bidora_phone_verified') !== 'true') { verificationStep = 'phone'; openModal('verifyModal'); } 
@@ -552,24 +663,34 @@
             } else { alert('Código incorrecto.'); }
         }
 
-        // SE MUESTRA EL TELÉFONO O CORREO DEL USUARIO EN LA LISTA DE VERIFICACIÓN DEL ADMIN
         async function openAdminVerificationPanel(type) {
             verificationStep = type;
-            const list = document.getElementById('adminVerifList'); list.innerHTML = 'Buscando...'; openModal('adminVerifModal');
+            const list = document.getElementById('adminVerifList'); 
+            document.getElementById('adminModalTitle').innerHTML = type === 'phone' ? 'Códigos Pendientes (Teléfono)' : 'Códigos Pendientes (Correo)';
+            list.innerHTML = 'Buscando...'; openModal('adminVerifModal');
             let pending = await window.getPendingCodesFromCloud(type); list.innerHTML = '';
             
             pending.forEach(i => {
                 const icon = type === 'phone' ? '<i class="fab fa-whatsapp text-green-500 mr-1"></i>' : '<i class="fas fa-envelope text-blue-500 mr-1"></i>';
+                const msgText = type === 'phone' 
+                    ? `¡Hola! Tu código de verificación para Bidora es: ${i.code}. No lo compartas con nadie.`
+                    : `¡Hola! Tu código de verificación de correo para Bidora es: ${i.code}. No lo compartas con nadie.`;
+
                 list.innerHTML += `
-                    <div class="bg-gray-50 p-2.5 rounded-xl border flex justify-between items-center shadow-sm">
-                        <div>
-                            <span class="block mb-1">User: <strong>${i.user}</strong></span>
-                            <span class="block text-[11px] text-gray-600 mb-1 font-semibold">${icon} ${i.contact}</span>
-                            <strong class="text-indigo-600 tracking-widest">${i.code}</strong>
+                    <div class="bg-gray-50 p-3 rounded-xl border flex flex-col gap-2 shadow-sm">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <span class="block">User: <strong class="text-indigo-600">${i.username}</strong></span>
+                                <span class="block text-[11px] text-gray-600 font-semibold">${icon} ${i.contact}</span>
+                            </div>
+                            <div class="flex space-x-1">
+                                <button onclick="markAsVerifiedByAdmin('${i.id}', '${type}')" class="bg-green-500 hover:bg-green-600 text-white px-2.5 py-1 rounded text-[10px] font-bold" title="Aprobar directamente">✔</button>
+                                <button onclick="deleteUserRegistration('${i.id}', '${type}')" class="bg-red-500 hover:bg-red-600 text-white px-2.5 py-1 rounded text-[10px] font-bold" title="Eliminar registro">✖</button>
+                            </div>
                         </div>
-                        <div class="flex space-x-1">
-                            <button onclick="markAsVerifiedByAdmin('${i.id}', '${type}')" class="bg-green-500 text-white px-2 py-1 rounded text-[10px] font-bold">✔</button>
-                            <button onclick="deleteUserRegistration('${i.id}', '${type}')" class="bg-red-500 text-white px-2 py-1 rounded text-[10px] font-bold">✖</button>
+                        <div class="flex items-center justify-between bg-white p-2 rounded-lg border">
+                            <span class="font-bold text-gray-900 tracking-widest text-sm">${i.code}</span>
+                            <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar Mensaje</button>
                         </div>
                     </div>`;
             });
@@ -584,9 +705,8 @@
         function openModal(id) { document.getElementById(id).classList.add('block'); document.getElementById(id).classList.remove('hidden'); }
         function closeModal(id) { document.getElementById(id).classList.remove('block'); document.getElementById(id).classList.add('hidden'); }
         function switchToModal(targetId) { 
-            closeModal('loginModal'); closeModal('registerModal'); closeModal('recoveryModal');
-            cancelRecovery(); 
-            openModal(targetId); 
+            closeModal('loginModal'); closeModal('registerModal'); closeModal('recoveryModal'); closeModal('staffChatModal');
+            cancelRecovery(); openModal(targetId); 
         }
         function checkOutsideClose(event, modalId) { if (event.target.classList.contains('modal-backdrop')) { closeModal(modalId); } }
     </script>
