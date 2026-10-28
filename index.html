@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Sincronización Total -->
+    <!-- Firebase SDK y Sincronización en la Nube -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -23,7 +23,7 @@
         };
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = window.db = getFirestore(app); // Guardamos db en window para usarlo globalmente
 
         // Subastas
         window.saveAuctionToFirebase = async function(title, category, price, description, location, allowAnon, image) {
@@ -62,8 +62,8 @@
                                     <p class="text-xs text-gray-500 mt-1">Vendedor: <a href="javascript:void(0)" onclick="openUserProfile('${item.seller}')" class="text-indigo-600 font-bold hover:underline">${item.seller}</a></p>
                                 </div>
                                 <div class="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-                                    <span class="text-lg font-bold text-indigo-600">$${Number(item.price).toLocaleString()}</span>
-                                    <button onclick="preChatCheck('${item.allowAnon}')" class="bg-gray-900 hover:bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-lg">Entrar al Chat</button>
+                                    <span class="text-lg font-bold text-indigo-600">$${Number(item.price).toLocaleString('es-CO')}</span>
+                                    <button onclick="preChatCheck('${item.allowAnon}')" class="bg-gray-900 hover:bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Entrar al Chat</button>
                                 </div>
                             </div>`;
                         grid.appendChild(card);
@@ -120,8 +120,8 @@
 
                 if (docSnap.exists()) {
                     const userData = docSnap.data();
-                    if (type === 'phone' && String(userData.phoneCode || '').trim() === codeUser) match = true;
-                    if (type === 'email' && String(userData.emailCode || '').trim() === codeUser) match = true;
+                    if (type === 'phone' && String(userData.phoneCode).trim() === codeUser) match = true;
+                    if (type === 'email' && String(userData.emailCode).trim() === codeUser) match = true;
                 }
 
                 if (match) {
@@ -132,7 +132,7 @@
             } catch (e) { return false; }
         };
 
-        // Reenviar código y actualizarlo de inmediato en Firestore
+        // Reenviar código
         window.resendVerificationCodeInCloud = async function(userId, type) {
             const newCode = String(Math.floor(100000 + Math.random() * 900000));
             if(type === 'phone') localStorage.setItem('bidora_current_phone_code', newCode);
@@ -141,23 +141,15 @@
             try {
                 if (userId) {
                     const userRef = doc(db, "usuarios", String(userId).trim());
-                    if(type === 'phone') {
-                        await updateDoc(userRef, { phoneCode: newCode }); 
-                    } else {
-                        await updateDoc(userRef, { emailCode: newCode }); 
-                    }
+                    if(type === 'phone') await updateDoc(userRef, { phoneCode: newCode }); 
+                    else await updateDoc(userRef, { emailCode: newCode }); 
                 }
-            } catch(e) {
-                console.error("Error al actualizar el código en la nube:", e);
-            }
+            } catch(e) {}
             return newCode;
         };
 
         window.loginFromCloud = async function(userInput, pass) {
             const user = userInput.trim().toLowerCase();
-            if (user === 'yefermc' && pass === 'Raperodelbien1@') {
-                return { id: 'yefermc', username: 'yefermc', phoneVerified: true, emailVerified: true, isAdmin: true, role: '👑 Presidente / Fundador Supremo', isFounder: true };
-            }
             try {
                 let q = query(collection(db, "usuarios"), where("username", "==", user));
                 let snap = await getDocs(q);
@@ -168,23 +160,53 @@
                     const data = docSnap.data();
                     if (data.password === pass) { foundUser = { id: docSnap.id, ...data }; }
                 });
+                
+                if (foundUser && foundUser.username === 'yefermc') {
+                    foundUser.isAdmin = true;
+                    foundUser.role = '👑 Presidente / Fundador Supremo';
+                    foundUser.isFounder = true;
+                }
                 return foundUser;
             } catch (e) { return null; }
         };
 
-        const jerarquiaNiveles = {
-            '👑 Presidente / Fundador Supremo': 10,
-            '💼 Director de Operaciones (COO)': 9,
-            '🛡️ Moderador Senior / Head of Staff': 8,
-            '🔨 Moderador de Subastas': 7,
-            '⚖️ Moderador de Disputas': 6,
-            '🎧 Supervisor de Soporte': 5,
-            '💬 Agente de Soporte Técnico': 4,
-            '💻 Desarrollador / IT': 3,
-            '📈 Director de Marketing': 2,
-            '👤 Usuario Estándar': 1
+        // Obtener datos y estadísticas para el perfil (Ahora incluye docId, fullName y phone)
+        window.getUserPublicStats = async function(username) {
+            try {
+                const qAuct = await getDocs(collection(db, "subastas"));
+                let created = 0, won = 0;
+                let history = [];
+                qAuct.forEach(d => { 
+                    const item = d.data();
+                    if (item.seller === username) created++; 
+                    if (item.winner === username) {
+                        won++;
+                        history.push({ title: item.title, price: item.price, type: 'Ganada' });
+                    }
+                });
+
+                const qUser = query(collection(db, "usuarios"), where("username", "==", username.toLowerCase()));
+                const snapUser = await getDocs(qUser);
+                let isFounder = false, role = '👤 Usuario Estándar';
+                let fullName = '', phone = '', docId = '';
+
+                if(!snapUser.empty) { 
+                    const data = snapUser.docs[0].data();
+                    isFounder = data.isFounder; 
+                    role = data.role || '👤 Usuario Estándar'; 
+                    fullName = data.fullName || '';
+                    phone = data.phone || '';
+                    docId = snapUser.docs[0].id;
+                }
+                
+                if (username.toLowerCase() === 'yefermc') { isFounder = true; role = '👑 Presidente / Fundador Supremo'; }
+                return { created, won, isFounder, role, history, fullName, phone, docId };
+            } catch(e) { 
+                return { created: 0, won: 0, isFounder: false, role: '👤 Usuario Estándar', history: [], fullName: '', phone: '', docId: '' }; 
+            }
         };
 
+        // Panel Admin funciones
         window.updateUserRoleInCloud = async function(userId, newRole) {
             try {
                 const userRef = doc(db, "usuarios", userId);
@@ -206,11 +228,8 @@
 
         window.deleteUserRegistration = async function(userId, type) {
             try {
-                if(userId) {
-                    await deleteDoc(doc(db, "usuarios", String(userId).trim()));
-                }
-                alert("¡Registro eliminado con éxito!");
-                openAdminVerificationPanel(type);
+                if(userId) { await deleteDoc(doc(db, "usuarios", String(userId).trim())); }
+                alert("¡Registro eliminado con éxito!"); openAdminVerificationPanel(type);
             } catch (e) { alert("Error al eliminar."); }
         };
 
@@ -220,31 +239,37 @@
                     const userRef = doc(db, "usuarios", String(userId).trim());
                     await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
                 }
-                alert("¡Verificado con éxito!");
-                openAdminVerificationPanel(type);
+                alert("¡Verificado con éxito!"); openAdminVerificationPanel(type);
             } catch (e) { alert("Error al verificar."); }
         };
 
-        // Panel Admin: Carga directa de todos los usuarios registrados para garantizar visibilidad absoluta
         window.getPendingCodesFromCloud = async function(type) {
             try {
                 let results = [];
                 const snap = await getDocs(collection(db, "usuarios"));
-                
                 snap.forEach((d) => { 
                     const data = d.data(); 
-                    if(data.username && data.username !== 'yefermc') {
+                    const isPhonePending = type === 'phone' && (data.phoneVerified === false || data.phoneVerified === undefined);
+                    const isEmailPending = type === 'email' && (data.emailVerified === false || data.emailVerified === undefined);
+                    if((isPhonePending || isEmailPending) && data.username) {
                         results.push({ 
-                            id: d.id, 
-                            username: data.username, 
+                            id: d.id, username: data.username, 
                             contact: type === 'phone' ? (data.phone || 'No registrado') : (data.email || 'No registrado'), 
                             code: type === 'phone' ? (data.phoneCode || '123456') : (data.emailCode || '123456')
                         }); 
                     }
                 });
-
                 return results;
             } catch (e) { return []; }
+        };
+
+        // Actualizar datos del usuario (Edición de Perfil)
+        window.saveProfileEditsToCloud = async function(docId, newName, newPhone) {
+            try {
+                const userRef = doc(db, "usuarios", docId);
+                await updateDoc(userRef, { fullName: newName, phone: newPhone });
+                return true;
+            } catch (e) { return false; }
         };
 
         window.requestPasswordResetCode = async function(usernameInput) {
@@ -275,35 +300,27 @@
                 const snap = await getDocs(q);
                 if (snap.empty) return { success: false, msg: "Usuario no existe." };
                 const userDoc = snap.docs[0];
-                const userData = userDoc.data();
-
-                if (String(userData.recoveryCode).trim() === String(code).trim()) {
+                if (String(userDoc.data().recoveryCode).trim() === String(code).trim()) {
                     await updateDoc(doc(db, "usuarios", userDoc.id), { password: newPass, recoveryCode: null });
                     const recQ = query(collection(db, "recuperaciones"), where("userId", "==", userDoc.id));
                     const recSnap = await getDocs(recQ);
                     recSnap.forEach(d => deleteDoc(doc(db, "recuperaciones", d.id)));
                     return { success: true };
-                } else {
-                    return { success: false, msg: "Código incorrecto." };
-                }
+                } else { return { success: false, msg: "Código incorrecto." }; }
             } catch(e) { return { success: false, msg: "Error de servidor." }; }
         };
 
         window.getRecoveryRequestsForAdmin = async function() {
             try {
                 const snap = await getDocs(collection(db, "recuperaciones"));
-                let reqs = [];
-                snap.forEach(d => reqs.push({ id: d.id, ...d.data() }));
-                return reqs;
+                let reqs = []; snap.forEach(d => reqs.push({ id: d.id, ...d.data() })); return reqs;
             } catch(e) { return []; }
         };
 
         window.sendUserSuggestion = async function(suggestionText) {
             try {
                 const user = localStorage.getItem('bidora_active_user') || 'Anónimo';
-                await addDoc(collection(db, "sugerencias"), {
-                    username: user, suggestion: suggestionText, createdAt: new Date()
-                });
+                await addDoc(collection(db, "sugerencias"), { username: user, suggestion: suggestionText, createdAt: new Date() });
                 alert('¡Sugerencia enviada con éxito!');
             } catch(e) { alert('Error al enviar sugerencia.'); }
         };
@@ -311,9 +328,7 @@
         window.getAdminSuggestions = async function() {
             try {
                 const snap = await getDocs(collection(db, "sugerencias"));
-                let list = [];
-                snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-                return list;
+                let list = []; snap.forEach(d => list.push({ id: d.id, ...d.data() })); return list;
             } catch(e) { return []; }
         };
 
@@ -341,60 +356,20 @@
         window.getConnectedAdminsCount = async function() {
             try {
                 const snap = await getDocs(collection(db, "usuarios"));
-                let count = 0;
-                snap.forEach(d => {
-                    if (d.data().isAdmin || d.data().username === 'yefermc') count++;
-                });
-                return count;
+                let count = 0; snap.forEach(d => { if (d.data().isAdmin || d.data().username === 'yefermc') count++; }); return count;
             } catch(e) { return 1; }
         };
 
         window.startPrivateSupportChat = async function() {
             try {
                 const user = localStorage.getItem('bidora_active_user') || 'Invitado';
-                const docRef = await addDoc(collection(db, "soporte_chats"), {
-                    username: user, status: 'abierto', createdAt: new Date()
-                });
-                localStorage.setItem('bidora_current_chat_id', docRef.id);
-                return docRef.id;
+                const docRef = await addDoc(collection(db, "soporte_chats"), { username: user, status: 'abierto', createdAt: new Date() });
+                localStorage.setItem('bidora_current_chat_id', docRef.id); return docRef.id;
             } catch(e) { return null; }
-        };
-
-        window.getUserPublicStats = async function(username) {
-            try {
-                const qAuct = await getDocs(collection(db, "subastas"));
-                let created = 0, won = 0;
-                let history = [];
-                qAuct.forEach(d => { 
-                    const item = d.data();
-                    if (item.seller === username) created++; 
-                    if (item.winner === username) {
-                        won++;
-                        history.push({ title: item.title, price: item.price, type: 'Ganada' });
-                    }
-                });
-
-                const qUser = query(collection(db, "usuarios"), where("username", "==", username.toLowerCase()));
-                const snapUser = await getDocs(qUser);
-                let isFounder = false, role = '👤 Usuario Estándar';
-                if(!snapUser.empty) { 
-                    isFounder = snapUser.docs[0].data().isFounder; 
-                    role = snapUser.docs[0].data().role || '👤 Usuario Estándar'; 
-                }
-                if (username.toLowerCase() === 'yefermc') { isFounder = true; role = '👑 Presidente / Fundador Supremo'; }
-                return { created, won, isFounder, role, history };
-            } catch(e) { return { created: 0, won: 0, isFounder: false, role: '👤 Usuario Estándar', history: [] }; }
         };
     </script>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans">
-
-    <!-- Banner Superior de Verificación Pendiente -->
-    <div id="verificationBanner" class="hidden bg-amber-500 text-white text-xs sm:text-sm font-semibold py-2 px-4 text-center shadow-inner flex items-center justify-center gap-2">
-        <i class="fas fa-exclamation-triangle"></i>
-        <span>Tu cuenta está pendiente de verificación completa.</span>
-        <button onclick="resumeVerification()" class="underline font-bold hover:text-gray-100 ml-1">Verificar ahora</button>
-    </div>
 
     <!-- Navbar -->
     <header class="bg-white shadow-sm sticky top-0 z-50">
@@ -436,13 +411,22 @@
         <div id="auctionGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
     </main>
 
-    <!-- Modal Perfil -->
+    <!-- Modal Perfil (Con Edición) -->
     <div id="userProfileModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'userProfileModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-center text-gray-800 max-h-[90vh] overflow-y-auto">
             <div class="w-20 h-20 bg-indigo-100 text-indigo-600 text-3xl font-bold rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner" id="profileAvatarLetter">U</div>
+            
             <h3 id="profileUsernameTitle" class="text-lg font-extrabold text-gray-900">Usuario</h3>
+            <p id="profileFullName" class="text-sm text-gray-600 font-medium"></p>
+            <p id="profilePhone" class="text-xs text-gray-500 mb-2"></p>
             <p id="profileUserRole" class="text-xs text-indigo-600 font-semibold mb-3">Jerarquía</p>
-            <div id="profileFounderBadge" class="mb-4 flex justify-center gap-2 flex-wrap"></div>
+            
+            <div id="profileFounderBadge" class="mb-2 flex justify-center gap-2 flex-wrap"></div>
+            
+            <!-- Botón de Editar -->
+            <div id="editProfileBtnContainer" class="hidden mb-4 mt-2">
+                <button onclick="openEditProfile()" class="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold py-2.5 rounded-xl text-xs transition border border-indigo-200"><i class="fas fa-edit mr-1"></i> Editar mis datos</button>
+            </div>
             
             <div class="grid grid-cols-2 gap-3 text-xs mb-4">
                 <div class="bg-gray-50 p-3 rounded-xl border shadow-sm"><span class="block text-gray-500 font-semibold">Subastas hechas</span><strong id="statAuctionsCreated" class="text-lg text-indigo-600">0</strong></div>
@@ -457,6 +441,25 @@
             </div>
 
             <button onclick="closeModal('userProfileModal')" class="w-full bg-gray-200 hover:bg-gray-300 font-bold py-2 rounded-xl text-xs transition">Cerrar</button>
+        </div>
+    </div>
+
+    <!-- Modal Editar Perfil -->
+    <div id="editProfileModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'editProfileModal')">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-left text-gray-800">
+            <h3 class="text-lg font-bold mb-2"><i class="fas fa-user-edit text-indigo-600 mr-2"></i>Editar Perfil</h3>
+            <p class="text-xs text-gray-500 mb-4">Corrige tus datos personales. Esta información es útil para que los compradores o vendedores te contacten.</p>
+            
+            <label class="block text-xs font-bold text-gray-700 mb-1">Nombre Completo</label>
+            <input type="text" id="editFullName" class="w-full border p-3 rounded-xl text-sm mb-3 focus:outline-none focus:border-indigo-500">
+            
+            <label class="block text-xs font-bold text-gray-700 mb-1">Teléfono</label>
+            <input type="tel" id="editPhone" class="w-full border p-3 rounded-xl text-sm mb-4 focus:outline-none focus:border-indigo-500">
+            
+            <div class="flex justify-end space-x-2">
+                <button onclick="cancelEditProfile()" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cancelar</button>
+                <button onclick="saveProfileChanges()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs shadow w-full">Guardar</button>
+            </div>
         </div>
     </div>
 
@@ -514,12 +517,12 @@
                 <h3 class="text-lg font-bold text-gray-900 mb-2"><i class="fas fa-lock text-indigo-600 mr-2"></i>Recuperar Contraseña</h3>
                 <p class="text-xs text-gray-500 mb-4">Ingresa tu usuario para recibir un código de recuperación.</p>
                 <input type="text" id="recoveryUsername" placeholder="Tu nombre de usuario" class="w-full border p-3 rounded-xl text-sm mb-3">
-                <button onclick="handleRequestRecoveryCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Enviar Código por WhatsApp o SMS</button>
+                <button onclick="handleRequestRecoveryCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Enviar Código</button>
                 <button onclick="switchToModal('loginModal')" class="text-gray-400 font-bold text-xs hover:underline block mx-auto mt-4">Cancelar</button>
             </div>
             <div id="recoveryStep2" class="hidden space-y-3">
                 <div class="bg-green-100 text-green-700 p-2.5 rounded-lg text-xs font-semibold mb-3">
-                    <i class="fas fa-check-circle mr-1"></i> Te llegará un código de verificación por WhatsApp o SMS. No lo compartas.
+                    <i class="fas fa-check-circle mr-1"></i> Te llegará un código de verificación por WhatsApp o SMS.
                 </div>
                 <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-key text-emerald-500 mr-2"></i>Ingresa tu Código</h3>
                 <input type="text" id="recoveryCodeInput" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest">
@@ -549,7 +552,7 @@
             </div>
             <div id="staffChatMessagesContainer" class="flex-1 border rounded-xl p-3 overflow-y-auto space-y-2 mb-3 bg-gray-50 text-xs"></div>
             <div class="flex gap-2">
-                <input type="text" id="staffMessageInput" placeholder="Escribe un mensaje para el staff..." class="flex-1 border p-2 rounded-xl text-xs">
+                <input type="text" id="staffMessageInput" placeholder="Escribe un mensaje..." class="flex-1 border p-2 rounded-xl text-xs">
                 <button onclick="handleSendStaffMessage()" class="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow">Enviar</button>
             </div>
             <button onclick="closeModal('staffChatModal')" class="mt-3 bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded-xl text-xs font-bold">Cerrar</button>
@@ -587,7 +590,7 @@
     <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
         <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
             <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verificación</h3>
-            <p class="text-xs text-gray-500 mb-4">Te hemos enviado un código de 6 dígitos por WhatsApp o SMS. Ingrésalo aquí para continuar.</p>
+            <p id="verifyModalDesc" class="text-xs text-gray-500 mb-4">Te hemos enviado un código de 6 dígitos. Ingrésalo aquí para continuar.</p>
             <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
             <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Verificar</button>
             <div class="text-xs text-gray-500">
@@ -601,7 +604,7 @@
     <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <h3 id="adminModalTitle" class="text-base font-bold mb-2">Códigos</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Lista sincronizada en tiempo real desde Firebase.</p>
+            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Lista de códigos pendientes en la nube.</p>
             <div id="adminVerifList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
             <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
         </div>
@@ -624,34 +627,55 @@
 
     <!-- Lógica de UI / Eventos del Sistema -->
     <script>
+        import { getDocs, query, collection, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        
         let verificationStep = 'phone';
         let countdownInterval = null;
 
-        window.onload = function() {
-            const activeUser = localStorage.getItem('bidora_active_user');
-            let isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
+        function actualizarTextosVerificacion() {
+            const titulo = document.getElementById('verifyModalTitle');
+            const desc = document.getElementById('verifyModalDesc');
             
-            if (activeUser === 'yefermc') { 
-                isAdmin = true; 
-                localStorage.setItem('bidora_is_admin', 'true');
+            if (verificationStep === 'phone') {
+                titulo.innerHTML = '<i class="fab fa-whatsapp text-green-500 mr-2"></i>Verificar Teléfono';
+                desc.innerText = 'Te hemos enviado un código de 6 dígitos por WhatsApp o SMS. Ingrésalo aquí para continuar.';
+            } else {
+                titulo.innerHTML = '<i class="fas fa-envelope text-blue-500 mr-2"></i>Verificar Correo';
+                desc.innerText = 'Te hemos enviado un código de 6 dígitos a tu correo electrónico. Ingrésalo aquí para continuar.';
             }
+        }
 
+        window.onload = async function() {
+            const activeUser = localStorage.getItem('bidora_active_user');
+            
             if (activeUser) {
-                if (isAdmin) { 
-                    document.getElementById('adminToolbar').classList.remove('hidden'); 
+                try {
+                    const q = query(collection(window.db, "usuarios"), where("username", "==", activeUser));
+                    const snap = await getDocs(q);
+                    
+                    if (!snap.empty) {
+                        const dbUser = snap.docs[0].data();
+                        let isAdmin = dbUser.isAdmin;
+                        
+                        if (activeUser === 'yefermc') { isAdmin = true; }
+                        
+                        if (isAdmin) { 
+                            document.getElementById('adminToolbar').classList.remove('hidden'); 
+                            localStorage.setItem('bidora_is_admin', 'true');
+                        } else {
+                            localStorage.setItem('bidora_is_admin', 'false');
+                        }
+                        
+                        setAuthUI(activeUser, dbUser.phoneVerified && dbUser.emailVerified, isAdmin, dbUser.isFounder || activeUser === 'yefermc');
+                        
+                        localStorage.setItem('bidora_phone_verified', dbUser.phoneVerified ? 'true' : 'false');
+                        localStorage.setItem('bidora_email_verified', dbUser.emailVerified ? 'true' : 'false');
+                    } else {
+                        setGuestUI(); 
+                    }
+                } catch(e) {
+                    setAuthUI(activeUser, localStorage.getItem('bidora_phone_verified') === 'true' && localStorage.getItem('bidora_email_verified') === 'true', false, false);
                 }
-                const phoneVer = localStorage.getItem('bidora_phone_verified') === 'true';
-                const emailVer = localStorage.getItem('bidora_email_verified') === 'true';
-                const isFounder = localStorage.getItem('bidora_is_founder') === 'true';
-                
-                // Mostrar u ocultar el banner superior de verificación pendiente
-                if (!phoneVer || !emailVer) {
-                    document.getElementById('verificationBanner').classList.remove('hidden');
-                } else {
-                    document.getElementById('verificationBanner').classList.add('hidden');
-                }
-
-                setAuthUI(activeUser, phoneVer && emailVer, isAdmin, isFounder);
             } else { 
                 setGuestUI(); 
             }
@@ -710,11 +734,9 @@
             const userId = localStorage.getItem('bidora_temp_user_id');
             const newCode = await window.resendVerificationCodeInCloud(userId, verificationStep);
             if(newCode) {
-                alert("¡Se ha solicitado un nuevo código! Te llegará por WhatsApp o SMS en breve.");
+                alert("¡Se ha solicitado un nuevo código! Te llegará en breve.");
                 startCountdown();
-            } else {
-                alert('Error al reenviar código.');
-            }
+            } else { alert('Error al reenviar código.'); }
         }
 
         async function openAdminStaffManagement() {
@@ -723,29 +745,17 @@
             list.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
             const users = await window.getAllUsersForAdmin();
             list.innerHTML = '';
-            if(users.length === 0) {
-                list.innerHTML = '<p class="text-center text-gray-400">No hay usuarios.</p>';
-                return;
-            }
+            if(users.length === 0) { list.innerHTML = '<p class="text-center text-gray-400">No hay usuarios.</p>'; return; }
             
             const rolesAmpliados = [
-                '👑 Presidente / Fundador Supremo',
-                '💼 Director de Operaciones (COO)',
-                '🛡️ Moderador Senior / Head of Staff',
-                '🔨 Moderador de Subastas',
-                '⚖️ Moderador de Disputas',
-                '🎧 Supervisor de Soporte',
-                '💬 Agente de Soporte Técnico',
-                '💻 Desarrollador / IT',
-                '📈 Director de Marketing',
-                '👤 Usuario Estándar'
+                '👑 Presidente / Fundador Supremo', '💼 Director de Operaciones (COO)', '🛡️ Moderador Senior / Head of Staff',
+                '🔨 Moderador de Subastas', '⚖️ Moderador de Disputas', '🎧 Supervisor de Soporte', '💬 Agente de Soporte Técnico',
+                '💻 Desarrollador / IT', '📈 Director de Marketing', '👤 Usuario Estándar'
             ];
 
             users.forEach(u => {
                 let optionsHTML = '';
-                rolesAmpliados.forEach(r => {
-                    optionsHTML += `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`;
-                });
+                rolesAmpliados.forEach(r => { optionsHTML += `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`; });
 
                 list.innerHTML += `
                     <div class="bg-gray-50 p-3 rounded-xl border flex flex-col sm:flex-row justify-between items-center gap-2">
@@ -754,43 +764,56 @@
                             <span class="text-[10px] text-gray-500">${u.fullName} (${u.email})</span>
                         </div>
                         <div class="flex items-center gap-2">
-                            <select id="roleSelect_${u.id}" class="border p-1.5 rounded-lg text-xs font-semibold bg-white">
-                                ${optionsHTML}
-                            </select>
+                            <select id="roleSelect_${u.id}" class="border p-1.5 rounded-lg text-xs font-semibold bg-white">${optionsHTML}</select>
                             <button onclick="handleRoleChange('${u.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs">Guardar</button>
                         </div>
-                    </div>
-                `;
+                    </div>`;
             });
         }
 
         async function handleRoleChange(userId) {
             const select = document.getElementById(`roleSelect_${userId}`);
-            const newRole = select.value;
-            await window.updateUserRoleInCloud(userId, newRole);
+            await window.updateUserRoleInCloud(userId, select.value);
         }
 
+        // PERFIL
         async function openUserProfile(username) {
             if(!username) return; openModal('userProfileModal');
             document.getElementById('profileUsernameTitle').innerText = username;
             document.getElementById('profileAvatarLetter').innerText = username.charAt(0).toUpperCase();
+            document.getElementById('profileFullName').innerText = 'Cargando...';
+            document.getElementById('profilePhone').innerText = '';
             document.getElementById('statAuctionsCreated').innerText = '...';
             document.getElementById('statAuctionsWon').innerText = '...';
             document.getElementById('profileFounderBadge').innerHTML = '';
             document.getElementById('profilePurchaseHistory').innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
+            document.getElementById('editProfileBtnContainer').classList.add('hidden');
 
             const stats = await window.getUserPublicStats(username);
+            
             document.getElementById('profileUserRole').innerText = `Jerarquía: ${stats.role}`;
             document.getElementById('statAuctionsCreated').innerText = stats.created;
             document.getElementById('statAuctionsWon').innerText = stats.won;
+            document.getElementById('profileFullName').innerText = stats.fullName || 'Sin nombre registrado';
+
+            // Privacidad del teléfono
+            const currentUser = localStorage.getItem('bidora_active_user');
+            const isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
+
+            if (currentUser === username || isAdmin) {
+                document.getElementById('profilePhone').innerText = "📞 " + (stats.phone || 'No registrado');
+            }
+            
+            if (currentUser === username) {
+                document.getElementById('editProfileBtnContainer').classList.remove('hidden');
+                localStorage.setItem('bidora_edit_doc_id', stats.docId);
+                localStorage.setItem('bidora_edit_fullname', stats.fullName);
+                localStorage.setItem('bidora_edit_phone', stats.phone);
+            }
             
             let badgesHTML = '';
-            if(stats.isFounder) {
-                badgesHTML += '<span class="bg-amber-500 text-white text-[10px] px-2.5 py-1 rounded-full font-bold shadow-sm">👑 Miembro Fundador</span>';
-            }
-            if(!stats.role.includes('Estándar')) {
-                badgesHTML += `<span class="bg-purple-600 text-white text-[10px] px-2.5 py-1 rounded-full font-bold shadow-sm">⚡ Staff / Trabajador</span>`;
-            }
+            if(stats.isFounder) badgesHTML += '<span class="bg-amber-500 text-white text-[10px] px-2.5 py-1 rounded-full font-bold shadow-sm">👑 Miembro Fundador</span>';
+            if(!stats.role.includes('Estándar')) badgesHTML += `<span class="bg-purple-600 text-white text-[10px] px-2.5 py-1 rounded-full font-bold shadow-sm">⚡ Staff / Trabajador</span>`;
             document.getElementById('profileFounderBadge').innerHTML = badgesHTML;
 
             const historyContainer = document.getElementById('profilePurchaseHistory');
@@ -802,13 +825,45 @@
                     historyContainer.innerHTML += `
                         <div class="bg-white p-2 rounded-lg border flex justify-between items-center shadow-xs">
                             <div><span class="font-bold text-gray-900 block">${h.title}</span><span class="text-[10px] text-emerald-600 font-semibold">Ganada</span></div>
-                            <span class="font-bold text-indigo-600">$${Number(h.price).toLocaleString()}</span>
-                        </div>
-                    `;
+                            <span class="font-bold text-indigo-600">$${Number(h.price).toLocaleString('es-CO')}</span>
+                        </div>`;
                 });
             }
         }
 
+        window.openEditProfile = function() {
+            closeModal('userProfileModal');
+            document.getElementById('editFullName').value = localStorage.getItem('bidora_edit_fullname') || '';
+            document.getElementById('editPhone').value = localStorage.getItem('bidora_edit_phone') || '';
+            openModal('editProfileModal');
+        };
+
+        window.cancelEditProfile = function() {
+            closeModal('editProfileModal');
+            openModal('userProfileModal');
+        };
+
+        window.saveProfileChanges = async function() {
+            const docId = localStorage.getItem('bidora_edit_doc_id');
+            const newName = document.getElementById('editFullName').value.trim();
+            const newPhone = document.getElementById('editPhone').value.trim();
+            
+            if(!newName || !newPhone) { alert("Por favor, llena ambos campos."); return; }
+            
+            const btn = event.target; btn.innerText = "Guardando..."; btn.disabled = true;
+
+            const success = await window.saveProfileEditsToCloud(docId, newName, newPhone);
+            
+            btn.innerText = "Guardar"; btn.disabled = false;
+
+            if(success) {
+                alert("¡Perfil actualizado correctamente!");
+                closeModal('editProfileModal');
+                openUserProfile(localStorage.getItem('bidora_active_user'));
+            } else { alert("Ocurrió un error al guardar."); }
+        };
+
+        // EVENTOS UI 
         async function handleSubmitSuggestion() {
             const text = document.getElementById('suggestionInput').value.trim();
             if(!text) { alert('Escribe una sugerencia.'); return; }
@@ -823,20 +878,13 @@
             list.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
             const suggestions = await window.getAdminSuggestions();
             list.innerHTML = '';
-            if(suggestions.length === 0) {
-                list.innerHTML = '<p class="text-center text-gray-400">No hay sugerencias.</p>';
-                return;
-            }
+            if(suggestions.length === 0) { list.innerHTML = '<p class="text-center text-gray-400">No hay sugerencias.</p>'; return; }
             suggestions.forEach(s => {
                 list.innerHTML += `
                     <div class="bg-gray-50 p-3 rounded-xl border flex justify-between items-start">
-                        <div>
-                            <span class="text-indigo-600 font-bold block">${s.username}</span>
-                            <p class="text-gray-800 mt-1">${s.suggestion}</p>
-                        </div>
+                        <div><span class="text-indigo-600 font-bold block">${s.username}</span><p class="text-gray-800 mt-1">${s.suggestion}</p></div>
                         <button onclick="window.deleteAdminSuggestion('${s.id}')" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-bold">Borrar</button>
-                    </div>
-                `;
+                    </div>`;
             });
         }
 
@@ -856,18 +904,13 @@
         }
 
         window.resumeVerification = function() {
-            if (localStorage.getItem('bidora_phone_verified') !== 'true') { 
-                verificationStep = 'phone'; 
-                openModal('verifyModal'); 
-                document.getElementById('timerDisplay').classList.add('hidden');
-                document.getElementById('resendBtn').classList.remove('hidden');
-            } 
-            else if (localStorage.getItem('bidora_email_verified') !== 'true') { 
-                verificationStep = 'email'; 
-                openModal('verifyModal'); 
-                document.getElementById('timerDisplay').classList.add('hidden');
-                document.getElementById('resendBtn').classList.remove('hidden');
-            }
+            if (localStorage.getItem('bidora_phone_verified') !== 'true') verificationStep = 'phone'; 
+            else if (localStorage.getItem('bidora_email_verified') !== 'true') verificationStep = 'email'; 
+            
+            actualizarTextosVerificacion();
+            openModal('verifyModal'); 
+            document.getElementById('timerDisplay').classList.add('hidden');
+            document.getElementById('resendBtn').classList.remove('hidden');
         };
 
         async function handleLogin() {
@@ -878,17 +921,10 @@
                 closeModal('loginModal');
                 localStorage.setItem('bidora_active_user', logged.username); 
                 localStorage.setItem('bidora_temp_user_id', logged.id);
-                localStorage.setItem('bidora_role', logged.role || '👤 Usuario Estándar');
                 localStorage.setItem('bidora_phone_verified', logged.phoneVerified ? 'true' : 'false'); 
                 localStorage.setItem('bidora_email_verified', logged.emailVerified ? 'true' : 'false');
-                if(logged.isAdmin || logged.username === 'yefermc') {
-                    localStorage.setItem('bidora_is_admin', 'true');
-                }
-                alert('¡Bienvenido!'); 
-                location.reload();
-            } else { 
-                alert('Credenciales incorrectas.'); 
-            }
+                alert('¡Bienvenido!'); location.reload();
+            } else { alert('Credenciales incorrectas.'); }
         }
 
         async function handleRegistrationUpload() {
@@ -901,25 +937,20 @@
             if (!fn || !un || !em || !pw || !ph) { alert('Completa todos los campos.'); return; }
             
             const res = await window.registerUserInCloud(fn, un, em, pw, ph, '');
-            if (res && res.error) { 
-                alert(res.error); 
-                return; 
-            }
+            if (res && res.error) { alert(res.error); return; }
             
             if(res && res.id) {
                 localStorage.setItem('bidora_temp_user_id', res.id); 
                 localStorage.setItem('bidora_active_user', un.toLowerCase());
                 closeModal('registerModal'); 
-                verificationStep = 'phone'; 
                 
+                verificationStep = 'phone'; actualizarTextosVerificacion(); 
                 alert("¡Registro exitoso! Te hemos enviado un código de verificación por WhatsApp o SMS.");
 
                 openModal('verifyModal');
                 document.getElementById('timerDisplay').classList.add('hidden');
                 document.getElementById('resendBtn').classList.remove('hidden');
-            } else { 
-                alert('No se pudo registrar.'); 
-            }
+            } else { alert('No se pudo registrar.'); }
         }
 
         async function submitVerificationCode() {
@@ -930,22 +961,16 @@
             if (isValid) {
                 if (verificationStep === 'phone') {
                     localStorage.setItem('bidora_phone_verified', 'true'); 
-                    verificationStep = 'email';
+                    verificationStep = 'email'; actualizarTextosVerificacion(); 
                     document.getElementById('verifyInputCode').value = ''; 
-                    
                     alert("¡Teléfono verificado con éxito! Ahora te hemos enviado el código de correo.");
-                    
                     document.getElementById('timerDisplay').classList.add('hidden');
                     document.getElementById('resendBtn').classList.remove('hidden');
                 } else {
-                    localStorage.setItem('bidora_email_verified', 'true'); 
-                    closeModal('verifyModal'); 
-                    alert('¡Cuenta 100% verificada automáticamente!'); 
-                    location.reload();
+                    localStorage.setItem('bidora_email_verified', 'true'); closeModal('verifyModal'); 
+                    alert('¡Cuenta 100% verificada automáticamente!'); location.reload();
                 }
-            } else { 
-                alert('Código incorrecto. Inténtalo de nuevo.'); 
-            }
+            } else { alert('Código incorrecto. Inténtalo de nuevo.'); }
         }
 
         async function openAdminVerificationPanel(type) {
@@ -955,27 +980,19 @@
             list.innerHTML = 'Buscando en la nube...'; openModal('adminVerifModal');
             let pending = await window.getPendingCodesFromCloud(type); list.innerHTML = '';
             
-            if(pending.length === 0) {
-                list.innerHTML = '<p class="text-center text-gray-400 py-4">No hay códigos pendientes.</p>';
-                return;
-            }
+            if(pending.length === 0) { list.innerHTML = '<p class="text-center text-gray-400 py-4">No hay códigos pendientes.</p>'; return; }
 
             pending.forEach(i => {
                 const icon = type === 'phone' ? '<i class="fab fa-whatsapp text-green-500 mr-1"></i>' : '<i class="fas fa-envelope text-blue-500 mr-1"></i>';
-                const msgText = type === 'phone' 
-                    ? `¡Hola! Tu código de verificación para Bidora es: ${i.code}. No lo compartas con nadie.`
-                    : `¡Hola! Tu código de verificación de correo para Bidora es: ${i.code}. No lo compartas con nadie.`;
+                const msgText = type === 'phone' ? `¡Hola! Tu código de verificación para Bidora es: ${i.code}. No lo compartas con nadie.` : `¡Hola! Tu código de verificación de correo para Bidora es: ${i.code}. No lo compartas con nadie.`;
 
                 list.innerHTML += `
                     <div class="bg-gray-50 p-3 rounded-xl border flex flex-col gap-2 shadow-sm">
                         <div class="flex justify-between items-center">
-                            <div>
-                                <span class="block">User: <strong class="text-indigo-600">${i.username}</strong></span>
-                                <span class="block text-[11px] text-gray-600 font-semibold">${icon} ${i.contact}</span>
-                            </div>
+                            <div><span class="block">User: <strong class="text-indigo-600">${i.username}</strong></span><span class="block text-[11px] text-gray-600 font-semibold">${icon} ${i.contact}</span></div>
                             <div class="flex space-x-1">
-                                <button onclick="markAsVerifiedByAdmin('${i.id}', '${type}')" class="bg-green-500 hover:bg-green-600 text-white px-2.5 py-1 rounded text-[10px] font-bold" title="Aprobar">✔</button>
-                                <button onclick="deleteUserRegistration('${i.id}', '${type}')" class="bg-red-500 hover:bg-red-600 text-white px-2.5 py-1 rounded text-[10px] font-bold" title="Eliminar">✖</button>
+                                <button onclick="markAsVerifiedByAdmin('${i.id}', '${type}')" class="bg-green-500 hover:bg-green-600 text-white px-2.5 py-1 rounded text-[10px] font-bold">✔</button>
+                                <button onclick="deleteUserRegistration('${i.id}', '${type}')" class="bg-red-500 hover:bg-red-600 text-white px-2.5 py-1 rounded text-[10px] font-bold">✖</button>
                             </div>
                         </div>
                         <div class="flex items-center justify-between bg-white p-2 rounded-lg border">
@@ -1002,26 +1019,19 @@
             const newPass = document.getElementById('recoveryNewPassword').value.trim();
             if(!code || !newPass) { alert("Completa los campos."); return; }
             const res = await window.submitNewPassword(user, code, newPass);
-            if(res.success) {
-                alert("¡Contraseña actualizada!");
-                cancelRecovery(); switchToModal('loginModal');
-            } else { alert(res.msg); }
+            if(res.success) { alert("¡Contraseña actualizada!"); cancelRecovery(); switchToModal('loginModal'); } 
+            else { alert(res.msg); }
         }
 
         function cancelRecovery() {
-            document.getElementById('recoveryUsername').value = '';
-            document.getElementById('recoveryCodeInput').value = '';
-            document.getElementById('recoveryNewPassword').value = '';
-            document.getElementById('recoveryStep1').classList.remove('hidden');
-            document.getElementById('recoveryStep2').classList.add('hidden');
+            document.getElementById('recoveryUsername').value = ''; document.getElementById('recoveryCodeInput').value = ''; document.getElementById('recoveryNewPassword').value = '';
+            document.getElementById('recoveryStep1').classList.remove('hidden'); document.getElementById('recoveryStep2').classList.add('hidden');
         }
 
         async function openAdminRecoveryPanel() {
             openModal('adminRecoveryModal');
-            const list = document.getElementById('adminRecoveryList');
-            list.innerHTML = '<p class="text-center text-gray-400">Buscando...</p>';
-            const reqs = await window.getRecoveryRequestsForAdmin();
-            list.innerHTML = '';
+            const list = document.getElementById('adminRecoveryList'); list.innerHTML = '<p class="text-center text-gray-400">Buscando...</p>';
+            const reqs = await window.getRecoveryRequestsForAdmin(); list.innerHTML = '';
             if(reqs.length === 0) { list.innerHTML = '<p class="text-center text-gray-400">No hay solicitudes.</p>'; return; }
             reqs.forEach(r => {
                 const msgText = `Tu código de recuperación para Bidora es: ${r.code}`;
@@ -1039,33 +1049,35 @@
             const countBadge = document.getElementById('connectedAdminsBadge');
             
             container.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
-            const count = await window.getConnectedAdminsCount();
-            countBadge.innerText = `Admins Conectados: ${count}`;
+            const count = await window.getConnectedAdminsCount(); countBadge.innerText = `Admins Conectados: ${count}`;
 
-            const msgs = await window.getStaffChatMessages();
-            container.innerHTML = '';
-            if(msgs.length === 0) {
-                container.innerHTML = '<p class="text-center text-gray-400 py-4">No hay mensajes.</p>';
-                return;
-            }
-            msgs.forEach(m => {
-                container.innerHTML += `<div class="bg-white p-2 rounded border"><strong>${m.sender} (${m.role}):</strong> ${m.message}</div>`;
-            });
+            const msgs = await window.getStaffChatMessages(); container.innerHTML = '';
+            if(msgs.length === 0) { container.innerHTML = '<p class="text-center text-gray-400 py-4">No hay mensajes.</p>'; return; }
+            msgs.forEach(m => { container.innerHTML += `<div class="bg-white p-2 rounded border"><strong>${m.sender} (${m.role}):</strong> ${m.message}</div>`; });
         }
 
         async function handleSendStaffMessage() {
             const input = document.getElementById('staffMessageInput');
             if(!input.value.trim()) return;
-            await window.sendStaffChatMessage(input.value.trim());
-            input.value = '';
-            openStaffChatModal();
+            await window.sendStaffChatMessage(input.value.trim()); input.value = ''; openStaffChatModal();
         }
 
         function handleAuctionPublish() {
-            const t = document.getElementById('newAuctionTitle').value;
-            const p = document.getElementById('newAuctionPrice').value;
+            const t = document.getElementById('newAuctionTitle').value; const p = document.getElementById('newAuctionPrice').value;
+            if(!t || !p) { alert("Completa título y precio."); return; }
             window.saveAuctionToFirebase(t, 'Tecnología', p, '', '', false, '');
         }
+        
+        // Función agregada para evitar el error del botón de la subasta
+        window.preChatCheck = function(allowAnon) {
+            const user = localStorage.getItem('bidora_active_user');
+            if (!user && allowAnon === 'false') {
+                alert("Debes iniciar sesión para entrar al chat de esta subasta.");
+                openModal('loginModal');
+                return;
+            }
+            alert("Próximamente: Redirigiendo a la sala de chat de esta subasta...");
+        };
 
         function logout() { localStorage.clear(); location.reload(); }
         function openModal(id) { document.getElementById(id).classList.add('block'); document.getElementById(id).classList.remove('hidden'); }
