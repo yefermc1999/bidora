@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Firebase SDK y Sincronización Blindada -->
+    <!-- Firebase SDK y Sincronización Total -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -132,7 +132,7 @@
             } catch (e) { return false; }
         };
 
-        // Reenviar código y actualizarlo en la nube
+        // Reenviar código y actualizarlo de inmediato en Firestore
         window.resendVerificationCodeInCloud = async function(userId, type) {
             const newCode = String(Math.floor(100000 + Math.random() * 900000));
             if(type === 'phone') localStorage.setItem('bidora_current_phone_code', newCode);
@@ -141,10 +141,15 @@
             try {
                 if (userId) {
                     const userRef = doc(db, "usuarios", String(userId).trim());
-                    if(type === 'phone') await updateDoc(userRef, { phoneCode: newCode }); 
-                    else await updateDoc(userRef, { emailCode: newCode }); 
+                    if(type === 'phone') {
+                        await updateDoc(userRef, { phoneCode: newCode }); 
+                    } else {
+                        await updateDoc(userRef, { emailCode: newCode }); 
+                    }
                 }
-            } catch(e) {}
+            } catch(e) {
+                console.error("Error al actualizar el código en la nube:", e);
+            }
             return newCode;
         };
 
@@ -220,7 +225,7 @@
             } catch (e) { alert("Error al verificar."); }
         };
 
-        // Panel Admin: Consulta abierta y segura que muestra todos los usuarios para garantizar que aparezcan siempre
+        // Panel Admin: Carga directa de todos los usuarios registrados para garantizar visibilidad absoluta
         window.getPendingCodesFromCloud = async function(type) {
             try {
                 let results = [];
@@ -228,10 +233,7 @@
                 
                 snap.forEach((d) => { 
                     const data = d.data(); 
-                    // Si el usuario no es admin supremo y le falta verificar el teléfono o correo, lo mostramos
-                    const isNotVerified = type === 'phone' ? !data.phoneVerified : !data.emailVerified;
-                    
-                    if(isNotVerified && data.username && data.username !== 'yefermc') {
+                    if(data.username && data.username !== 'yefermc') {
                         results.push({ 
                             id: d.id, 
                             username: data.username, 
@@ -386,6 +388,13 @@
     </script>
 </head>
 <body class="bg-gray-50 text-gray-800 font-sans">
+
+    <!-- Banner Superior de Verificación Pendiente -->
+    <div id="verificationBanner" class="hidden bg-amber-500 text-white text-xs sm:text-sm font-semibold py-2 px-4 text-center shadow-inner flex items-center justify-center gap-2">
+        <i class="fas fa-exclamation-triangle"></i>
+        <span>Tu cuenta está pendiente de verificación completa.</span>
+        <button onclick="resumeVerification()" class="underline font-bold hover:text-gray-100 ml-1">Verificar ahora</button>
+    </div>
 
     <!-- Navbar -->
     <header class="bg-white shadow-sm sticky top-0 z-50">
@@ -592,7 +601,7 @@
     <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
             <h3 id="adminModalTitle" class="text-base font-bold mb-2">Códigos</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Lista de usuarios registrados pendientes.</p>
+            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Lista sincronizada en tiempo real desde Firebase.</p>
             <div id="adminVerifList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
             <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
         </div>
@@ -634,6 +643,14 @@
                 const phoneVer = localStorage.getItem('bidora_phone_verified') === 'true';
                 const emailVer = localStorage.getItem('bidora_email_verified') === 'true';
                 const isFounder = localStorage.getItem('bidora_is_founder') === 'true';
+                
+                // Mostrar u ocultar el banner superior de verificación pendiente
+                if (!phoneVer || !emailVer) {
+                    document.getElementById('verificationBanner').classList.remove('hidden');
+                } else {
+                    document.getElementById('verificationBanner').classList.add('hidden');
+                }
+
                 setAuthUI(activeUser, phoneVer && emailVer, isAdmin, isFounder);
             } else { 
                 setGuestUI(); 
