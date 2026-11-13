@@ -1,1122 +1,176 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="light">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bidora - Subastas y Chats Seguros</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- Firebase SDK y Sincronización Total -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyBz5akqL6ij-T9S3kn9r0716Ng7yA8hmc8",
-            authDomain: "bidora-aca53.firebaseapp.com",
-            projectId: "bidora-aca53",
-            storageBucket: "bidora-aca53.firebasestorage.app",
-            messagingSenderId: "819474816590",
-            appId: "1:819474816590:web:b5c0d4803f449479552d1f",
-            measurementId: "G-YELL8ZXRCK"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
-        // Subastas
-        window.saveAuctionToFirebase = async function(title, category, price, description, location, allowAnon, image) {
-            try {
-                const seller = localStorage.getItem('bidora_active_user') || 'yefermc';
-                await addDoc(collection(db, "subastas"), {
-                    title, category, price: Number(price), description, location, allowAnon,
-                    image: image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=500&q=80',
-                    seller: seller, status: 'activa', winner: null, createdAt: new Date()
-                });
-                alert('¡Subasta publicada con éxito!'); location.reload();
-            } catch (e) { console.error("Error al publicar: ", e); }
-        };
-
-        window.loadFirebaseAuctions = async function() {
-            try {
-                const querySnapshot = await getDocs(collection(db, "subastas"));
-                const grid = document.getElementById('auctionGrid');
-                if(!grid) return;
-                grid.innerHTML = '';
-                
-                querySnapshot.forEach((docSnap) => {
-                    const item = docSnap.data();
-                    if(item.status === 'activa') {
-                        const card = document.createElement('div');
-                        card.className = "auction-card bg-white rounded-xl shadow-sm hover:shadow-md transition overflow-hidden border border-gray-100 flex flex-col relative";
-                        card.innerHTML = `
-                            <div class="relative">
-                                <img src="${item.image}" alt="${item.title}" class="w-full h-48 object-cover">
-                                <span class="absolute top-2 right-2 bg-indigo-600 text-white text-xs font-bold px-2.5 py-1 rounded-full">${item.allowAnon ? 'Permite Anónimos' : 'Solo Verificados'}</span>
-                            </div>
-                            <div class="p-4 flex-1 flex flex-col justify-between">
-                                <div>
-                                    <span class="text-xs text-indigo-600 font-semibold uppercase tracking-wider">${item.category}</span>
-                                    <h3 class="font-semibold text-gray-900 mt-1">${item.title}</h3>
-                                    <p class="text-xs text-gray-500 mt-1">Vendedor: <a href="javascript:void(0)" onclick="openUserProfile('${item.seller}')" class="text-indigo-600 font-bold hover:underline">${item.seller}</a></p>
-                                </div>
-                                <div class="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
-                                    <span class="text-lg font-bold text-indigo-600">$${Number(item.price).toLocaleString()}</span>
-                                    <button onclick="preChatCheck('${item.allowAnon}')" class="bg-gray-900 hover:bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-lg">Entrar al Chat</button>
-                                </div>
-                            </div>`;
-                        grid.appendChild(card);
-                    }
-                });
-            } catch (e) { console.log("Error cargando subastas"); }
-        };
-
-        // Registro de Usuario en la Nube
-        window.registerUserInCloud = async function(fullName, usernameInput, email, password, phone, profilePic) {
-            try {
-                const username = usernameInput.trim().toLowerCase();
-                const qUser = query(collection(db, "usuarios"), where("username", "==", username));
-                const userSnap = await getDocs(qUser);
-                if (!userSnap.empty) return { error: "Este usuario ya está en uso" };
-                
-                const phoneCode = String(Math.floor(100000 + Math.random() * 900000));
-                const emailCode = String(Math.floor(100000 + Math.random() * 900000));
-
-                let role = '👤 Usuario Estándar';
-                let isAdmin = false;
-                if(username === 'yefermc') {
-                    role = '👑 Presidente / Fundador Supremo';
-                    isAdmin = true;
-                }
-
-                const docRef = await addDoc(collection(db, "usuarios"), {
-                    fullName, username, email, password, phone,
-                    profilePic: profilePic || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
-                    phoneCode, emailCode, phoneVerified: false, emailVerified: false,
-                    isAdmin, role, isFounder: true, successfulTrades: 0, anonMode: false, recoveryCode: "", createdAt: new Date()
-                });
-
-                localStorage.setItem('bidora_temp_reg_id', docRef.id);
-                localStorage.setItem('bidora_current_phone_code', phoneCode);
-                localStorage.setItem('bidora_current_email_code', emailCode);
-
-                return { id: docRef.id };
-            } catch (e) { 
-                console.error("Error en registro:", e);
-                return { error: "Error de conexión: " + e.message }; 
-            }
-        };
-
-        // Verificación de Código ingresado por el usuario
-        window.verifyCodeInCloud = async function(userId, type, ingresado) {
-            try {
-                if(!userId) return false;
-                const codeUser = String(ingresado).trim();
-                
-                const userRef = doc(db, "usuarios", userId);
-                const docSnap = await getDoc(userRef);
-                let match = false;
-
-                if (docSnap.exists()) {
-                    const userData = docSnap.data();
-                    if (type === 'phone' && String(userData.phoneCode || '').trim() === codeUser) match = true;
-                    if (type === 'email' && String(userData.emailCode || '').trim() === codeUser) match = true;
-                }
-
-                if (match) {
-                    await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
-                }
-
-                return match;
-            } catch (e) { return false; }
-        };
-
-        // Reenviar código y actualizarlo de inmediato en Firestore
-        window.resendVerificationCodeInCloud = async function(userId, type) {
-            const newCode = String(Math.floor(100000 + Math.random() * 900000));
-            if(type === 'phone') localStorage.setItem('bidora_current_phone_code', newCode);
-            else localStorage.setItem('bidora_current_email_code', newCode);
-
-            try {
-                if (userId) {
-                    const userRef = doc(db, "usuarios", String(userId).trim());
-                    if(type === 'phone') {
-                        await updateDoc(userRef, { phoneCode: newCode }); 
-                    } else {
-                        await updateDoc(userRef, { emailCode: newCode }); 
-                    }
-                }
-            } catch(e) {
-                console.error("Error al actualizar el código en la nube:", e);
-            }
-            return newCode;
-        };
-
-        // Actualizar número de teléfono en caso de error
-        window.updateUserPhoneInCloud = async function(userId, newPhone) {
-            try {
-                if(!userId) return false;
-                const newCode = String(Math.floor(100000 + Math.random() * 900000));
-                const userRef = doc(db, "usuarios", String(userId).trim());
-                await updateDoc(userRef, { phone: newPhone, phoneCode: newCode });
-                localStorage.setItem('bidora_current_phone_code', newCode);
-                return true;
-            } catch(e) {
-                console.error("Error al actualizar teléfono:", e);
-                return false;
-            }
-        };
-
-        window.loginFromCloud = async function(userInput, pass) {
-            const user = userInput.trim().toLowerCase();
-            if (user === 'yefermc' && pass === 'Raperodelbien1@') {
-                return { id: 'yefermc', username: 'yefermc', phoneVerified: true, emailVerified: true, isAdmin: true, role: '👑 Presidente / Fundador Supremo', isFounder: true };
-            }
-            try {
-                let q = query(collection(db, "usuarios"), where("username", "==", user));
-                let snap = await getDocs(q);
-                if(snap.empty) { q = query(collection(db, "usuarios"), where("email", "==", user)); snap = await getDocs(q); }
-                
-                let foundUser = null;
-                snap.forEach((docSnap) => {
-                    const data = docSnap.data();
-                    if (data.password === pass) { foundUser = { id: docSnap.id, ...data }; }
-                });
-                return foundUser;
-            } catch (e) { return null; }
-        };
-
-        const jerarquiaNiveles = {
-            '👑 Presidente / Fundador Supremo': 10,
-            '💼 Director de Operaciones (COO)': 9,
-            '🛡️ Moderador Senior / Head of Staff': 8,
-            '🔨 Moderador de Subastas': 7,
-            '⚖️ Moderador de Disputas': 6,
-            '🎧 Supervisor de Soporte': 5,
-            '💬 Agente de Soporte Técnico': 4,
-            '💻 Desarrollador / IT': 3,
-            '📈 Director de Marketing': 2,
-            '👤 Usuario Estándar': 1
-        };
-
-        window.updateUserRoleInCloud = async function(userId, newRole) {
-            try {
-                const userRef = doc(db, "usuarios", userId);
-                let isAdmin = !newRole.includes('Estándar');
-                await updateDoc(userRef, { role: newRole, isAdmin: isAdmin });
-                alert(`¡Rango actualizado a "${newRole}" con éxito!`);
-                openAdminStaffManagement();
-            } catch(e) { alert('Error al actualizar el rango.'); }
-        };
-
-        window.getAllUsersForAdmin = async function() {
-            try {
-                const snap = await getDocs(collection(db, "usuarios"));
-                let users = [];
-                snap.forEach(d => users.push({ id: d.id, ...d.data() }));
-                return users;
-            } catch(e) { return []; }
-        };
-
-        window.deleteUserRegistration = async function(userId, type) {
-            try {
-                if(userId) {
-                    await deleteDoc(doc(db, "usuarios", String(userId).trim()));
-                }
-                alert("¡Registro eliminado con éxito!");
-                openAdminVerificationPanel(type);
-            } catch (e) { alert("Error al eliminar."); }
-        };
-
-        window.markAsVerifiedByAdmin = async function(userId, type) {
-            try {
-                if(userId) {
-                    const userRef = doc(db, "usuarios", String(userId).trim());
-                    await updateDoc(userRef, type === 'phone' ? { phoneVerified: true } : { emailVerified: true });
-                }
-                alert("¡Verificado con éxito!");
-                openAdminVerificationPanel(type);
-            } catch (e) { alert("Error al verificar."); }
-        };
-
-        // Panel Admin: Carga directa de todos los usuarios registrados
-        window.getPendingCodesFromCloud = async function(type) {
-            try {
-                let results = [];
-                const snap = await getDocs(collection(db, "usuarios"));
-                
-                snap.forEach((d) => { 
-                    const data = d.data(); 
-                    if(data.username && data.username !== 'yefermc') {
-                        results.push({ 
-                            id: d.id, 
-                            username: data.username, 
-                            contact: type === 'phone' ? (data.phone || 'No registrado') : (data.email || 'No registrado'), 
-                            code: type === 'phone' ? (data.phoneCode || '123456') : (data.emailCode || '123456')
-                        }); 
-                    }
-                });
-
-                return results;
-            } catch (e) { return []; }
-        };
-
-        window.requestPasswordResetCode = async function(usernameInput) {
-            try {
-                const username = usernameInput.trim().toLowerCase();
-                const q = query(collection(db, "usuarios"), where("username", "==", username));
-                const snap = await getDocs(q);
-                if (snap.empty) return false; 
-                
-                const userDoc = snap.docs[0];
-                const userData = userDoc.data();
-                const userId = userDoc.id;
-                const recoveryCode = String(Math.floor(100000 + Math.random() * 900000));
-
-                await updateDoc(doc(db, "usuarios", userId), { recoveryCode: recoveryCode });
-                await addDoc(collection(db, "recuperaciones"), { 
-                    userId: userId, username: username, phone: userData.phone || 'No registrado',
-                    code: recoveryCode, createdAt: new Date() 
-                });
-                return true;
-            } catch(e) { return false; }
-        };
-
-        window.submitNewPassword = async function(usernameInput, code, newPass) {
-            try {
-                const username = usernameInput.trim().toLowerCase();
-                const q = query(collection(db, "usuarios"), where("username", "==", username));
-                const snap = await getDocs(q);
-                if (snap.empty) return { success: false, msg: "Usuario no existe." };
-                const userDoc = snap.docs[0];
-                const userData = userDoc.data();
-
-                if (String(userData.recoveryCode).trim() === String(code).trim()) {
-                    await updateDoc(doc(db, "usuarios", userDoc.id), { password: newPass, recoveryCode: null });
-                    const recQ = query(collection(db, "recuperaciones"), where("userId", "==", userDoc.id));
-                    const recSnap = await getDocs(recQ);
-                    recSnap.forEach(d => deleteDoc(doc(db, "recuperaciones", d.id)));
-                    return { success: true };
-                } else {
-                    return { success: false, msg: "Código incorrecto." };
-                }
-            } catch(e) { return { success: false, msg: "Error de servidor." }; }
-        };
-
-        window.getRecoveryRequestsForAdmin = async function() {
-            try {
-                const snap = await getDocs(collection(db, "recuperaciones"));
-                let reqs = [];
-                snap.forEach(d => reqs.push({ id: d.id, ...d.data() }));
-                return reqs;
-            } catch(e) { return []; }
-        };
-
-        window.sendUserSuggestion = async function(suggestionText) {
-            try {
-                const user = localStorage.getItem('bidora_active_user') || 'Anónimo';
-                await addDoc(collection(db, "sugerencias"), {
-                    username: user, suggestion: suggestionText, createdAt: new Date()
-                });
-                alert('¡Sugerencia enviada con éxito!');
-            } catch(e) { alert('Error al enviar sugerencia.'); }
-        };
-
-        window.getAdminSuggestions = async function() {
-            try {
-                const snap = await getDocs(collection(db, "sugerencias"));
-                let list = [];
-                snap.forEach(d => list.push({ id: d.id, ...d.data() }));
-                return list;
-            } catch(e) { return []; }
-        };
-
-        window.deleteAdminSuggestion = async function(id) {
-            try { await deleteDoc(doc(db, "sugerencias", id)); openAdminSuggestionsModal(); } catch(e) {}
-        };
-
-        window.getStaffChatMessages = async function() {
-            try {
-                const snap = await getDocs(query(collection(db, "staff_chat"), orderBy("createdAt", "asc")));
-                let m = []; snap.forEach(d => m.push(d.data())); return m;
-            } catch(e) { return []; }
-        };
-
-        window.sendStaffChatMessage = async function(message) {
-            try {
-                await addDoc(collection(db, "staff_chat"), {
-                    sender: localStorage.getItem('bidora_active_user') || 'Admin',
-                    role: localStorage.getItem('bidora_role') || 'Admin',
-                    message, createdAt: new Date()
-                });
-            } catch(e) {}
-        };
-
-        window.getConnectedAdminsCount = async function() {
-            try {
-                const snap = await getDocs(collection(db, "usuarios"));
-                let count = 0;
-                snap.forEach(d => {
-                    if (d.data().isAdmin || d.data().username === 'yefermc') count++;
-                });
-                return count;
-            } catch(e) { return 1; }
-        };
-
-        window.startPrivateSupportChat = async function() {
-            try {
-                const user = localStorage.getItem('bidora_active_user') || 'Invitado';
-                const docRef = await addDoc(collection(db, "soporte_chats"), {
-                    username: user, status: 'abierto', createdAt: new Date()
-                });
-                localStorage.setItem('bidora_current_chat_id', docRef.id);
-                return docRef.id;
-            } catch(e) { return null; }
-        };
-
-        window.getUserPublicStats = async function(username) {
-            try {
-                const qAuct = await getDocs(collection(db, "subastas"));
-                let created = 0, won = 0;
-                let history = [];
-                qAuct.forEach(d => { 
-                    const item = d.data();
-                    if (item.seller === username) created++; 
-                    if (item.winner === username) {
-                        won++;
-                        history.push({ title: item.title, price: item.price, type: 'Ganada' });
-                    }
-                });
-
-                const qUser = query(collection(db, "usuarios"), where("username", "==", username.toLowerCase()));
-                const snapUser = await getDocs(qUser);
-                let isFounder = false, role = '👤 Usuario Estándar';
-                if(!snapUser.empty) { 
-                    isFounder = snapUser.docs[0].data().isFounder; 
-                    role = snapUser.docs[0].data().role || '👤 Usuario Estándar'; 
-                }
-                if (username.toLowerCase() === 'yefermc') { isFounder = true; role = '👑 Presidente / Fundador Supremo'; }
-                return { created, won, isFounder, role, history };
-            } catch(e) { return { created: 0, won: 0, isFounder: false, role: '👤 Usuario Estándar', history: [] }; }
-        };
-    </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bidora - Subastas Locales en Antioquia</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body class="bg-gray-50 text-gray-800 font-sans">
+<body>
 
-    <!-- Banner Superior de Verificación Pendiente -->
-    <div id="verificationBanner" class="hidden bg-amber-500 text-white text-xs sm:text-sm font-semibold py-2 px-4 text-center shadow-inner flex items-center justify-center gap-2">
-        <i class="fas fa-exclamation-triangle"></i>
-        <span>Tu cuenta está pendiente de verificación completa.</span>
-        <button onclick="resumeVerification()" class="underline font-bold hover:text-gray-100 ml-1">Verificar ahora</button>
+  <!-- Barra de Navegación -->
+  <header class="navbar">
+    <div class="nav-brand" onclick="switchView('home')" style="cursor: pointer;">🛒 BIDORA</div>
+    <div class="nav-actions">
+      <button id="themeToggle" class="theme-toggle-btn">🌙 Modo Oscuro</button>
+      <button id="navAdminBtn" class="nav-admin-btn hidden" onclick="switchView('admin')">👑 Panel Admin</button>
+      <div id="userNavProfile" class="nav-profile hidden" onclick="switchView('profile')" style="cursor: pointer;">
+        <img id="navUserAvatar" src="" alt="Avatar" class="twitch-avatar-nav">
+        <span id="navUserName">Usuario</span>
+      </div>
+      <button id="navLoginBtn" class="btn-secondary" onclick="switchView('auth')">Ingresar</button>
     </div>
+  </header>
 
-    <!-- Navbar -->
-    <header class="bg-white shadow-sm sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-4">
-                <span class="text-2xl font-black text-indigo-600 tracking-wider">BIDORA</span>
-                <div class="hidden sm:flex items-center space-x-3 text-xs">
-                    <button onclick="openModal('suggestionModal')" class="text-gray-600 font-semibold hover:text-indigo-600 transition"><i class="fas fa-lightbulb mr-1 text-amber-500"></i> Sugerencias</button>
-                    <button onclick="openUserSupportChat()" class="text-gray-600 font-semibold hover:text-indigo-600 transition"><i class="fas fa-headset mr-1 text-emerald-500"></i> Soporte Chat</button>
-                </div>
-            </div>
-            <div id="authContainer" class="flex items-center space-x-2 sm:space-x-3"></div>
-        </div>
-    </header>
+  <main class="container">
 
-    <!-- Panel Presidente / Gestión de Staff -->
-    <div id="adminToolbar" class="hidden bg-slate-900 text-white py-3 px-4 shadow-lg border-b-2 border-indigo-500">
-        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-xs sm:text-sm">
-            <div class="flex items-center space-x-3">
-                <span class="bg-red-600 text-white px-2.5 py-1 rounded-md font-bold uppercase text-xs">Panel Presidente / Admin</span>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-                <button onclick="openAdminStaffManagement()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-user-shield mr-1"></i> Gestionar Staff</button>
-                <button onclick="openAdminVerificationPanel('phone')" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fab fa-whatsapp mr-1"></i> Códigos Tel</button>
-                <button onclick="openAdminVerificationPanel('email')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-envelope mr-1"></i> Códigos Correo</button>
-                <button onclick="openAdminRecoveryPanel()" class="bg-indigo-800 hover:bg-indigo-900 text-white px-3 py-1.5 rounded-lg shadow font-semibold border border-indigo-500"><i class="fas fa-key mr-1"></i> Recuperar Pass</button>
-                <button onclick="openAdminSuggestionsModal()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-lightbulb mr-1"></i> Sugerencias</button>
-                <button onclick="openStaffChatModal()" class="bg-pink-600 hover:bg-pink-700 text-white px-3 py-1.5 rounded-lg shadow font-semibold"><i class="fas fa-comments mr-1"></i> Staff Chat</button>
-                <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg shadow font-semibold">Salir</button>
-            </div>
+    <!-- VISTA 1: CATÁLOGO DE SUBASTAS E INICIO -->
+    <section id="homeView" class="view-section">
+      <div class="hero-banner">
+        <h2>Subastas en Antioquia</h2>
+        <p>Compra y vende de forma segura con verificación local.</p>
+        <button class="btn-primary" onclick="openCreateAuctionModal()">+ Publicar Subasta Gratis</button>
+      </div>
+
+      <div class="filters-bar">
+        <input type="text" id="searchInput" placeholder="Buscar productos en Antioquia..." onkeyup="filterAuctions()">
+      </div>
+
+      <div id="auctionsGrid" class="auctions-grid">
+        <!-- Las tarjetas de subasta se cargan dinámicamente aquí -->
+      </div>
+    </section>
+
+    <!-- VISTA 2: DETALLE DE SUBASTA + CHAT EN VIVO Y PUJAS -->
+    <section id="detailView" class="view-section hidden">
+      <button class="btn-secondary" onclick="switchView('home')">← Volver al Catálogo</button>
+      <div class="auction-detail-card card">
+        <div id="detailContent">
+          <!-- Información del producto y contador regresivo -->
         </div>
+        <div class="bidding-section">
+          <h3>Realizar Puja</h3>
+          <div class="form-group">
+            <input type="number" id="bidAmountInput" placeholder="Monto de tu oferta ($ COP)">
+          </div>
+          <button class="btn-primary" onclick="placeBid()">Pujar Ahora</button>
+        </div>
+        <!-- Chat en vivo de la subasta -->
+        <div class="chat-box">
+          <h4>Chat de la Subasta</h4>
+          <div id="chatMessages" class="chat-messages"></div>
+          <div class="chat-input-group">
+            <input type="text" id="chatInput" placeholder="Escribe un mensaje...">
+            <button class="btn-secondary" onclick="sendChatMessage()">Enviar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VISTA 3: AUTENTICACIÓN -->
+    <section id="authView" class="view-section card hidden">
+      <h2>Bienvenido a Bidora</h2>
+      <p class="subtitle">Inicia sesión para pujar y vender</p>
+      
+      <button id="googleLoginBtn" class="btn-google">
+        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.13 0-5.78-2.11-6.73-4.96H1.2v3.15C3.21 21.32 7.28 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.2C.43 8.15 0 9.89 0 11.75s.43 3.6 1.2 5.14l4.07-2.65z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.28 0 3.21 2.68 1.2 6.61l4.07 3.15c.95-2.85 3.6-4.96 6.73-4.96z"/></svg>
+        Continuar con Google
+      </button>
+
+      <div class="divider"><span>o registro manual</span></div>
+
+      <form id="registerForm">
+        <div class="form-group"><label>Nombre de Usuario</label><input type="text" id="regName" required></div>
+        <div class="form-group"><label>Correo Electrónico</label><input type="email" id="regEmail" required></div>
+        <div class="form-group"><label>Contraseña</label><input type="password" id="regPassword" required></div>
+        <button type="submit" class="btn-primary">Registrarse con Correo</button>
+      </form>
+    </section>
+
+    <!-- VISTA 4: PERFIL Y CONFIGURACIÓN -->
+    <section id="profileView" class="view-section card hidden">
+      <h2>Mi Cuenta en Bidora</h2>
+      <div class="profile-box">
+        <img id="profileAvatarPreview" src="" alt="Avatar" class="twitch-avatar-large">
+        <div class="profile-info">
+          <h3 id="profileDisplayName">Nombre</h3>
+          <p id="profileDisplayEmail">correo@domain.com</p>
+          <span id="badgeVerified" class="badge-unverified">No Verificado</span>
+        </div>
+      </div>
+      <div class="settings-group">
+        <h4>Cambiar Foto de Perfil (Local)</h4>
+        <input type="file" id="localImageInput" accept="image/*">
+        <button id="uploadAvatarBtn" class="btn-secondary">Subir Nueva Foto</button>
+      </div>
+      <div class="settings-group">
+        <h4>Verificación de Identidad (Insignia Antioquia)</h4>
+        <p class="subtitle">Sube tu cédula para validar tu cuenta.</p>
+        <input type="file" id="idDocumentInput" accept="image/*">
+        <button id="submitIdBtn" class="btn-secondary" onclick="submitIdentityVerification()">Enviar Cédula a Revisión</button>
+      </div>
+      <button id="logoutBtn" class="btn-danger">Cerrar Sesión</button>
+    </section>
+
+    <!-- VISTA 5: PANEL ADMIN (RBAC: Admin Jefe, Verificadores, Moderadores) -->
+    <section id="adminView" class="view-section card hidden">
+      <h2>Panel de Control - Administradores</h2>
+      <p class="subtitle">Control total y jerarquía de moderación</p>
+      
+      <div class="admin-tabs">
+        <button class="btn-tab active" onclick="switchAdminTab('verifications')">Verificaciones de Cédula</button>
+        <button class="btn-tab" onclick="switchAdminTab('promotions')">Comprobantes Nequi</button>
+        <button class="btn-tab" onclick="switchAdminTab('users')">Gestión de Roles (RBAC)</button>
+      </div>
+
+      <div id="adminVerificationsContent" class="admin-tab-content">
+        <h3>Solicitudes de Identidad</h3>
+        <div id="adminVerificationsList">Cargando solicitudes...</div>
+      </div>
+
+      <div id="adminPromotionsContent" class="admin-tab-content hidden">
+        <h3>Pagos por Destacar (QR Nequi)</h3>
+        <div id="adminPromotionsList">Cargando comprobantes...</div>
+      </div>
+
+      <div id="adminUsersContent" class="admin-tab-content hidden">
+        <h3>Asignación de Roles de Administrador</h3>
+        <div class="form-group">
+          <input type="text" id="targetUserEmail" placeholder="Correo del usuario">
+          <select id="targetRoleSelect">
+            <option value="super_admin">Admin Jefe (Super Admin)</option>
+            <option value="verifier_admin">Verificador de Identidad</option>
+            <option value="market_moderator">Moderador de Mercado</option>
+            <option value="support_agent">Soporte al Cliente</option>
+          </select>
+          <button class="btn-primary" onclick="assignUserRole()">Actualizar Rol</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL DE PAGO QR NEQUI -->
+  <div id="nequiModal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Destacar Subasta (Pago Nequi)</h3>
+      <p>Escanea el código QR o transfiere al Nequi:</p>
+      <img src="tu-qr-nequi.png" alt="QR Nequi" class="nequi-qr-img" />
+      <p><strong>Nequi:</strong> 300 XXX XXXX | <strong>Valor:</strong> $5.000 COP</p>
+      <div class="form-group">
+        <label>Comprobante de Pago</label>
+        <input type="file" id="receiptInput" accept="image/*">
+      </div>
+      <div class="form-group">
+        <label>Número de Referencia</label>
+        <input type="text" id="referenceInput" placeholder="Ej: 987654">
+      </div>
+      <button class="btn-primary" onclick="submitNequiPayment()">Enviar Comprobante</button>
+      <button class="btn-secondary" onclick="closeNequiModal()">Cancelar</button>
     </div>
+  </div>
 
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div class="flex justify-between items-center mb-6">
-            <h1 class="text-xl font-bold text-gray-900">Subastas Activas</h1>
-            <button onclick="openModal('auctionCreateModal')" class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow">Publicar Producto</button>
-        </div>
-        <div id="auctionGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
-    </main>
-
-    <!-- Modal Perfil -->
-    <div id="userProfileModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'userProfileModal')">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-center text-gray-800 max-h-[90vh] overflow-y-auto">
-            <div class="w-20 h-20 bg-indigo-100 text-indigo-600 text-3xl font-bold rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner" id="profileAvatarLetter">U</div>
-            <h3 id="profileUsernameTitle" class="text-lg font-extrabold text-gray-900">Usuario</h3>
-            <p id="profileUserRole" class="text-xs text-indigo-600 font-semibold mb-3">Jerarquía</p>
-            <div id="profileFounderBadge" class="mb-4 flex justify-center gap-2 flex-wrap"></div>
-            
-            <div class="grid grid-cols-2 gap-3 text-xs mb-4">
-                <div class="bg-gray-50 p-3 rounded-xl border shadow-sm"><span class="block text-gray-500 font-semibold">Subastas hechas</span><strong id="statAuctionsCreated" class="text-lg text-indigo-600">0</strong></div>
-                <div class="bg-gray-50 p-3 rounded-xl border shadow-sm"><span class="block text-gray-500 font-semibold">Subastas ganadas</span><strong id="statAuctionsWon" class="text-lg text-emerald-600">0</strong></div>
-            </div>
-
-            <div class="text-left mb-4">
-                <h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2"><i class="fas fa-history mr-1 text-indigo-500"></i> Historial de Compras / Ganadas</h4>
-                <div id="profilePurchaseHistory" class="bg-gray-50 rounded-xl p-3 border max-h-36 overflow-y-auto space-y-2 text-xs">
-                    <p class="text-center text-gray-400">Cargando...</p>
-                </div>
-            </div>
-
-            <button onclick="closeModal('userProfileModal')" class="w-full bg-gray-200 hover:bg-gray-300 font-bold py-2 rounded-xl text-xs transition">Cerrar</button>
-        </div>
-    </div>
-
-    <!-- Modal Admin: Gestión de Staff -->
-    <div id="adminStaffModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminStaffModal')">
-        <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl text-gray-800">
-            <h3 class="text-base font-bold text-gray-900 mb-1"><i class="fas fa-user-shield text-purple-600 mr-2"></i>Gestión de Staff y Trabajadores</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Asciende o degrada a los miembros de la plataforma según su área operativa.</p>
-            <div id="adminStaffList" class="space-y-2 max-h-64 overflow-y-auto mb-4 text-xs"></div>
-            <button onclick="closeModal('adminStaffModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
-        </div>
-    </div>
-
-    <!-- Modal Sugerencias -->
-    <div id="suggestionModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'suggestionModal')">
-        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
-            <h3 class="text-base font-bold text-gray-900 mb-2"><i class="fas fa-lightbulb text-amber-500 mr-2"></i>Buzón de Sugerencias</h3>
-            <textarea id="suggestionInput" placeholder="Escribe tu sugerencia para mejorar Bidora..." class="w-full border p-3 rounded-xl text-xs mb-3 h-28 resize-none"></textarea>
-            <button onclick="handleSubmitSuggestion()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-2 shadow">Enviar Sugerencia</button>
-            <button onclick="closeModal('suggestionModal')" class="w-full bg-gray-200 py-2 rounded-xl text-xs font-bold">Cerrar</button>
-        </div>
-    </div>
-
-    <!-- Modal Admin Ver Sugerencias -->
-    <div id="adminSuggestionsModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminSuggestionsModal')">
-        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl text-gray-800">
-            <h3 class="text-base font-bold text-gray-900 mb-2"><i class="fas fa-lightbulb text-amber-500 mr-2"></i>Sugerencias de Usuarios</h3>
-            <div id="adminSuggestionsList" class="space-y-2 max-h-60 overflow-y-auto mb-4 text-xs"></div>
-            <button onclick="closeModal('adminSuggestionsModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
-        </div>
-    </div>
-
-    <!-- Modal Chat de Soporte -->
-    <div id="userSupportChatModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'userSupportChatModal')">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800 flex flex-col h-[420px]">
-            <div class="flex justify-between items-center mb-2 border-b pb-2">
-                <h3 class="text-sm font-bold text-gray-900"><i class="fas fa-headset text-emerald-500 mr-2"></i>Chat de Soporte con Staff</h3>
-                <span id="supportChatStatusBadge" class="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold">En línea</span>
-            </div>
-            <div id="userSupportMessages" class="flex-1 border rounded-xl p-3 overflow-y-auto space-y-2 mb-3 bg-gray-50 text-xs">
-                <div class="bg-indigo-50 p-2 rounded-lg text-indigo-900">Hola, ¿en qué podemos ayudarte hoy? Un agente de soporte te responderá pronto.</div>
-            </div>
-            <div id="supportInputArea" class="flex gap-2">
-                <input type="text" id="userSupportInput" placeholder="Escribe tu mensaje..." class="flex-1 border p-2 rounded-xl text-xs">
-                <button onclick="sendUserSupportMessage()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow">Enviar</button>
-            </div>
-            <button onclick="closeModal('userSupportChatModal')" class="mt-2 bg-gray-200 px-4 py-1.5 rounded-xl text-xs font-bold">Cerrar</button>
-        </div>
-    </div>
-
-    <!-- Modal Recuperación Continua -->
-    <div id="recoveryModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'recoveryModal')">
-        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
-            <div id="recoveryStep1">
-                <h3 class="text-lg font-bold text-gray-900 mb-2"><i class="fas fa-lock text-indigo-600 mr-2"></i>Recuperar Contraseña</h3>
-                <p class="text-xs text-gray-500 mb-4">Ingresa tu usuario para recibir un código de recuperación.</p>
-                <input type="text" id="recoveryUsername" placeholder="Tu nombre de usuario" class="w-full border p-3 rounded-xl text-sm mb-3">
-                <button onclick="handleRequestRecoveryCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-3 shadow">Enviar Código por WhatsApp o SMS</button>
-                <button onclick="switchToModal('loginModal')" class="text-gray-400 font-bold text-xs hover:underline block mx-auto mt-4">Cancelar</button>
-            </div>
-            <div id="recoveryStep2" class="hidden space-y-3">
-                <div class="bg-green-100 text-green-700 p-2.5 rounded-lg text-xs font-semibold mb-3">
-                    <i class="fas fa-check-circle mr-1"></i> Te llegará un código de verificación por WhatsApp o SMS. No lo compartas.
-                </div>
-                <h3 class="text-lg font-bold text-gray-900"><i class="fas fa-key text-emerald-500 mr-2"></i>Ingresa tu Código</h3>
-                <input type="text" id="recoveryCodeInput" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest">
-                <input type="password" id="recoveryNewPassword" placeholder="Crea una nueva contraseña" class="w-full border p-3 rounded-xl text-sm">
-                <button onclick="handleResetPasswordSubmit()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs shadow">Guardar y Entrar</button>
-                <button onclick="cancelRecovery()" class="text-gray-400 font-bold text-xs hover:underline block mx-auto mt-2">Empezar de nuevo</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal ADMIN: Recuperación -->
-    <div id="adminRecoveryModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminRecoveryModal')">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
-            <h3 class="text-base font-bold text-gray-900 mb-2"><i class="fas fa-key text-indigo-600 mr-2"></i>Códigos de Recuperación</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Copia el mensaje automático y envíaselo al usuario por WhatsApp o SMS.</p>
-            <div id="adminRecoveryList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
-            <button onclick="closeModal('adminRecoveryModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
-        </div>
-    </div>
-
-    <!-- Modal Chat de Staff -->
-    <div id="staffChatModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'staffChatModal')">
-        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl text-gray-800 flex flex-col h-[420px]">
-            <div class="flex justify-between items-center mb-2 border-b pb-2">
-                <h3 class="text-base font-bold text-gray-900"><i class="fas fa-comments text-pink-600 mr-2"></i>Chat Interno del Staff</h3>
-                <span id="connectedAdminsBadge" class="bg-indigo-100 text-indigo-700 text-[10px] px-2.5 py-1 rounded-full font-bold">Admins Conectados: ...</span>
-            </div>
-            <div id="staffChatMessagesContainer" class="flex-1 border rounded-xl p-3 overflow-y-auto space-y-2 mb-3 bg-gray-50 text-xs"></div>
-            <div class="flex gap-2">
-                <input type="text" id="staffMessageInput" placeholder="Escribe un mensaje para el staff..." class="flex-1 border p-2 rounded-xl text-xs">
-                <button onclick="handleSendStaffMessage()" class="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow">Enviar</button>
-            </div>
-            <button onclick="closeModal('staffChatModal')" class="mt-3 bg-gray-200 hover:bg-gray-300 px-4 py-1.5 rounded-xl text-xs font-bold">Cerrar</button>
-        </div>
-    </div>
-
-    <!-- Modal Login -->
-    <div id="loginModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'loginModal')">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
-            <h3 class="text-lg font-bold">Iniciar Sesión</h3>
-            <input type="text" id="loginUser" placeholder="Usuario o Correo" class="w-full border p-3 rounded-xl">
-            <input type="password" id="loginPass" placeholder="Contraseña" class="w-full border p-3 rounded-xl">
-            <button onclick="handleLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl shadow">Entrar</button>
-            <div class="flex justify-between items-center pt-2">
-                <button onclick="switchToModal('recoveryModal')" class="text-indigo-600 font-bold text-xs hover:underline">¿Olvidaste tu contraseña?</button>
-                <span class="text-xs text-gray-500">¿No tienes cuenta? <button onclick="switchToModal('registerModal')" class="text-indigo-600 font-bold hover:underline">Regístrate</button></span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal Registro -->
-    <div id="registerModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'registerModal')">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-3 text-sm">
-            <h3 class="text-lg font-bold">Crear Cuenta</h3>
-            <input type="text" id="regFullName" placeholder="Nombre completo" class="w-full border p-3 rounded-xl">
-            <input type="text" id="regUsername" placeholder="Usuario" class="w-full border p-3 rounded-xl">
-            <input type="email" id="regEmail" placeholder="Correo" class="w-full border p-3 rounded-xl">
-            <input type="password" id="regPassword" placeholder="Contraseña" class="w-full border p-3 rounded-xl">
-            <input type="tel" id="regPhone" placeholder="Teléfono" class="w-full border p-3 rounded-xl">
-            <button onclick="handleRegistrationUpload()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl shadow">Registrarse</button>
-        </div>
-    </div>
-
-    <!-- Modal Verificación -->
-    <div id="verifyModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'verifyModal')">
-        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
-            <h3 id="verifyModalTitle" class="text-base font-bold text-gray-900 mb-1">Verificación</h3>
-            <p class="text-xs text-gray-500 mb-4">Te hemos enviado un código de 6 dígitos por WhatsApp o SMS. Ingrésalo aquí para continuar.</p>
-            <input type="text" id="verifyInputCode" placeholder="Código de 6 dígitos" maxlength="6" class="w-full border p-3 rounded-xl text-center text-lg font-bold tracking-widest mb-3">
-            <button onclick="submitVerificationCode()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs mb-2 shadow">Verificar</button>
-            
-            <!-- Opción para editar el número si se equivocó -->
-            <div id="editPhoneSection" class="mb-3">
-                <button onclick="toggleEditPhone()" class="text-[11px] text-amber-600 font-bold hover:underline">✏️ ¿Te equivocaste de número? Editar número</button>
-                <div id="editPhoneBox" class="hidden mt-2 flex gap-1">
-                    <input type="tel" id="newPhoneInput" placeholder="Nuevo teléfono" class="border p-2 rounded-lg text-xs flex-1">
-                    <button onclick="saveNewPhone()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">Guardar</button>
-                </div>
-            </div>
-
-            <div class="text-xs text-gray-500 border-t pt-2">
-                <span id="timerDisplay" class="hidden">Reenviar código en <strong id="countdown">60</strong>s</span>
-                <button id="resendBtn" onclick="handleResendCode()" class="text-indigo-600 font-bold hover:underline">¿No te llegó? Reenviar nuevo código</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal Verificación Admin -->
-    <div id="adminVerifModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'adminVerifModal')">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl text-gray-800">
-            <h3 id="adminModalTitle" class="text-base font-bold mb-2">Códigos</h3>
-            <p class="text-[10px] text-gray-500 mb-3 leading-tight">Lista sincronizada en tiempo real desde Firebase.</p>
-            <div id="adminVerifList" class="space-y-2 max-h-56 overflow-y-auto mb-4 text-xs"></div>
-            <button onclick="closeModal('adminVerifModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs font-bold w-full">Cerrar</button>
-        </div>
-    </div>
-
-    <!-- Modal Publicar Producto -->
-    <div id="auctionCreateModal" class="modal-backdrop hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center p-4" onclick="checkOutsideClose(event, 'auctionCreateModal')">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-            <h3 class="text-lg font-bold mb-4">Publicar Producto</h3>
-            <div class="space-y-3 mb-4 text-xs">
-                <input type="text" id="newAuctionTitle" placeholder="Título" class="w-full border p-3 rounded-xl">
-                <input type="number" id="newAuctionPrice" placeholder="Precio" class="w-full border p-3 rounded-xl">
-            </div>
-            <div class="flex justify-end space-x-2">
-                <button onclick="closeModal('auctionCreateModal')" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded-xl text-xs">Cancelar</button>
-                <button onclick="handleAuctionPublish()" class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-xl text-xs shadow">Publicar</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Lógica de UI / Eventos del Sistema -->
-    <script>
-        let verificationStep = 'phone';
-        let countdownInterval = null;
-
-        window.onload = function() {
-            const activeUser = localStorage.getItem('bidora_active_user');
-            let isAdmin = localStorage.getItem('bidora_is_admin') === 'true';
-            
-            if (activeUser === 'yefermc') { 
-                isAdmin = true; 
-                localStorage.setItem('bidora_is_admin', 'true');
-            }
-
-            if (activeUser) {
-                if (isAdmin) { 
-                    document.getElementById('adminToolbar').classList.remove('hidden'); 
-                }
-                const phoneVer = localStorage.getItem('bidora_phone_verified') === 'true';
-                const emailVer = localStorage.getItem('bidora_email_verified') === 'true';
-                const isFounder = localStorage.getItem('bidora_is_founder') === 'true';
-                
-                if (!phoneVer || !emailVer) {
-                    document.getElementById('verificationBanner').classList.remove('hidden');
-                } else {
-                    document.getElementById('verificationBanner').classList.add('hidden');
-                }
-
-                setAuthUI(activeUser, phoneVer && emailVer, isAdmin, isFounder);
-            } else { 
-                setGuestUI(); 
-            }
-
-            if(typeof window.loadFirebaseAuctions === 'function') {
-                window.loadFirebaseAuctions();
-            }
-        };
-
-        function setGuestUI() {
-            document.getElementById('authContainer').innerHTML = `
-                <button onclick="openModal('loginModal')" class="text-gray-700 hover:text-indigo-600 text-xs sm:text-sm font-semibold px-3 py-2">Entrar</button>
-                <button onclick="openModal('registerModal')" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs sm:text-sm font-semibold px-3 py-2 rounded-full">Registrarse</button>
-            `;
-        }
-
-        function setAuthUI(username, fullyVerified, isAdmin, isFounder) {
-            const badgeStyle = fullyVerified ? "bg-blue-600 text-white" : "bg-red-500 text-white cursor-pointer animate-pulse";
-            const badgeText = fullyVerified ? '100% Verificado' : '⚠️ Faltan Verificar (Click)';
-            document.getElementById('authContainer').innerHTML = `
-                <div class="flex items-center space-x-2 mr-2">
-                    <span class="text-sm font-semibold text-gray-800 cursor-pointer hover:text-indigo-600" onclick="openUserProfile('${username}')">${username}</span>
-                    <span ${fullyVerified?'':`onclick="resumeVerification()"`} class="text-[10px] px-1.5 py-0.5 rounded ${badgeStyle}">${badgeText}</span>
-                </div>
-                <button onclick="logout()" class="text-red-500 text-xs font-semibold hover:underline">Salir</button>
-            `;
-        }
-
-        window.copyAutoMessage = function(textToCopy) {
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                alert("📋 ¡Mensaje copiado al portapapeles!");
-            });
-        };
-
-        function toggleEditPhone() {
-            const box = document.getElementById('editPhoneBox');
-            box.classList.toggle('hidden');
-        }
-
-        async function saveNewPhone() {
-            const newPhone = document.getElementById('newPhoneInput').value.trim();
-            const userId = localStorage.getItem('bidora_temp_user_id');
-            if(!newPhone) { alert("Escribe un número válido."); return; }
-            
-            const success = await window.updateUserPhoneInCloud(userId, newPhone);
-            if(success) {
-                alert("¡Teléfono actualizado con éxito! Se ha generado un nuevo código para este número.");
-                document.getElementById('editPhoneBox').classList.add('hidden');
-                document.getElementById('newPhoneInput').value = '';
-                startCountdown();
-            } else {
-                alert("Error al actualizar el teléfono.");
-            }
-        }
-
-        function startCountdown() {
-            let timeLeft = 60;
-            const timerDisplay = document.getElementById('timerDisplay');
-            const countdownEl = document.getElementById('countdown');
-            const resendBtn = document.getElementById('resendBtn');
-            timerDisplay.classList.remove('hidden');
-            resendBtn.classList.add('hidden');
-            if(countdownInterval) clearInterval(countdownInterval);
-
-            countdownInterval = setInterval(() => {
-                timeLeft--;
-                countdownEl.innerText = timeLeft;
-                if(timeLeft <= 0) {
-                    clearInterval(countdownInterval);
-                    timerDisplay.classList.add('hidden');
-                    resendBtn.classList.remove('hidden');
-                }
-            }, 1000);
-        }
-
-        async function handleResendCode() {
-            const userId = localStorage.getItem('bidora_temp_user_id');
-            const newCode = await window.resendVerificationCodeInCloud(userId, verificationStep);
-            if(newCode) {
-                alert("¡Se ha solicitado un nuevo código! Te llegará por WhatsApp o SMS en breve.");
-                startCountdown();
-            } else {
-                alert('Error al reenviar código.');
-            }
-        }
-
-        async function openAdminStaffManagement() {
-            openModal('adminStaffModal');
-            const list = document.getElementById('adminStaffList');
-            list.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
-            const users = await window.getAllUsersForAdmin();
-            list.innerHTML = '';
-            if(users.length === 0) {
-                list.innerHTML = '<p class="text-center text-gray-400">No hay usuarios.</p>';
-                return;
-            }
-            
-            const rolesAmpliados = [
-                '👑 Presidente / Fundador Supremo',
-                '💼 Director de Operaciones (COO)',
-                '🛡️ Moderador Senior / Head of Staff',
-                '🔨 Moderador de Subastas',
-                '⚖️ Moderador de Disputas',
-                '🎧 Supervisor de Soporte',
-                '💬 Agente de Soporte Técnico',
-                '💻 Desarrollador / IT',
-                '📈 Director de Marketing',
-                '👤 Usuario Estándar'
-            ];
-
-            users.forEach(u => {
-                let optionsHTML = '';
-                rolesAmpliados.forEach(r => {
-                    optionsHTML += `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`;
-                });
-
-                list.innerHTML += `
-                    <div class="bg-gray-50 p-3 rounded-xl border flex flex-col sm:flex-row justify-between items-center gap-2">
-                        <div>
-                            <span class="font-bold text-indigo-600 block cursor-pointer hover:underline" onclick="openUserProfile('${u.username}')">${u.username}</span>
-                            <span class="text-[10px] text-gray-500">${u.fullName} (${u.email})</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <select id="roleSelect_${u.id}" class="border p-1.5 rounded-lg text-xs font-semibold bg-white">
-                                ${optionsHTML}
-                            </select>
-                            <button onclick="handleRoleChange('${u.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs">Guardar</button>
-                        </div>
-                    </div>
-                `;
-            });
-        }
-
-        async function handleRoleChange(userId) {
-            const select = document.getElementById(`roleSelect_${userId}`);
-            const newRole = select.value;
-            await window.updateUserRoleInCloud(userId, newRole);
-        }
-
-        async function openUserProfile(username) {
-            if(!username) return; openModal('userProfileModal');
-            document.getElementById('profileUsernameTitle').innerText = username;
-            document.getElementById('profileAvatarLetter').innerText = username.charAt(0).toUpperCase();
-            document.getElementById('statAuctionsCreated').innerText = '...';
-            document.getElementById('statAuctionsWon').innerText = '...';
-            document.getElementById('profileFounderBadge').innerHTML = '';
-            document.getElementById('profilePurchaseHistory').innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
-
-            const stats = await window.getUserPublicStats(username);
-            document.getElementById('profileUserRole').innerText = `Jerarquía: ${stats.role}`;
-            document.getElementById('statAuctionsCreated').innerText = stats.created;
-            document.getElementById('statAuctionsWon').innerText = stats.won;
-            
-            let badgesHTML = '';
-            if(stats.isFounder) {
-                badgesHTML += '<span class="bg-amber-500 text-white text-[10px] px-2.5 py-1 rounded-full font-bold shadow-sm">👑 Miembro Fundador</span>';
-            }
-            if(!stats.role.includes('Estándar')) {
-                badgesHTML += `<span class="bg-purple-600 text-white text-[10px] px-2.5 py-1 rounded-full font-bold shadow-sm">⚡ Staff / Trabajador</span>`;
-            }
-            document.getElementById('profileFounderBadge').innerHTML = badgesHTML;
-
-            const historyContainer = document.getElementById('profilePurchaseHistory');
-            historyContainer.innerHTML = '';
-            if(!stats.history || stats.history.length === 0) {
-                historyContainer.innerHTML = '<p class="text-center text-gray-400 py-2">No hay subastas ganadas aún.</p>';
-            } else {
-                stats.history.forEach(h => {
-                    historyContainer.innerHTML += `
-                        <div class="bg-white p-2 rounded-lg border flex justify-between items-center shadow-xs">
-                            <div><span class="font-bold text-gray-900 block">${h.title}</span><span class="text-[10px] text-emerald-600 font-semibold">Ganada</span></div>
-                            <span class="font-bold text-indigo-600">$${Number(h.price).toLocaleString()}</span>
-                        </div>
-                    `;
-                });
-            }
-        }
-
-        async function handleSubmitSuggestion() {
-            const text = document.getElementById('suggestionInput').value.trim();
-            if(!text) { alert('Escribe una sugerencia.'); return; }
-            await window.sendUserSuggestion(text);
-            document.getElementById('suggestionInput').value = '';
-            closeModal('suggestionModal');
-        }
-
-        async function openAdminSuggestionsModal() {
-            openModal('adminSuggestionsModal');
-            const list = document.getElementById('adminSuggestionsList');
-            list.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
-            const suggestions = await window.getAdminSuggestions();
-            list.innerHTML = '';
-            if(suggestions.length === 0) {
-                list.innerHTML = '<p class="text-center text-gray-400">No hay sugerencias.</p>';
-                return;
-            }
-            suggestions.forEach(s => {
-                list.innerHTML += `
-                    <div class="bg-gray-50 p-3 rounded-xl border flex justify-between items-start">
-                        <div>
-                            <span class="text-indigo-600 font-bold block">${s.username}</span>
-                            <p class="text-gray-800 mt-1">${s.suggestion}</p>
-                        </div>
-                        <button onclick="window.deleteAdminSuggestion('${s.id}')" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-bold">Borrar</button>
-                    </div>
-                `;
-            });
-        }
-
-        async function openUserSupportChat() {
-            openModal('userSupportChatModal');
-            await window.startPrivateSupportChat();
-        }
-
-        function sendUserSupportMessage() {
-            const input = document.getElementById('userSupportInput');
-            const msg = input.value.trim();
-            if(!msg) return;
-            const container = document.getElementById('userSupportMessages');
-            container.innerHTML += `<div class="bg-emerald-50 p-2 rounded-lg text-right text-emerald-900">Tú: ${msg}</div>`;
-            input.value = '';
-            container.scrollTop = container.scrollHeight;
-        }
-
-        window.resumeVerification = function() {
-            if (localStorage.getItem('bidora_phone_verified') !== 'true') { 
-                verificationStep = 'phone'; 
-                openModal('verifyModal'); 
-                document.getElementById('timerDisplay').classList.add('hidden');
-                document.getElementById('resendBtn').classList.remove('hidden');
-            } 
-            else if (localStorage.getItem('bidora_email_verified') !== 'true') { 
-                verificationStep = 'email'; 
-                openModal('verifyModal'); 
-                document.getElementById('timerDisplay').classList.add('hidden');
-                document.getElementById('resendBtn').classList.remove('hidden');
-            }
-        };
-
-        async function handleLogin() {
-            const user = document.getElementById('loginUser').value.trim(); 
-            const pass = document.getElementById('loginPass').value;
-            const logged = await window.loginFromCloud(user, pass);
-            if (logged) {
-                closeModal('loginModal');
-                localStorage.setItem('bidora_active_user', logged.username); 
-                localStorage.setItem('bidora_temp_user_id', logged.id);
-                localStorage.setItem('bidora_role', logged.role || '👤 Usuario Estándar');
-                localStorage.setItem('bidora_phone_verified', logged.phoneVerified ? 'true' : 'false'); 
-                localStorage.setItem('bidora_email_verified', logged.emailVerified ? 'true' : 'false');
-                if(logged.isAdmin || logged.username === 'yefermc') {
-                    localStorage.setItem('bidora_is_admin', 'true');
-                }
-                alert('¡Bienvenido!'); 
-                location.reload();
-            } else { 
-                alert('Credenciales incorrectas.'); 
-            }
-        }
-
-        async function handleRegistrationUpload() {
-            const fn = document.getElementById('regFullName').value.trim();
-            const un = document.getElementById('regUsername').value.trim(); 
-            const em = document.getElementById('regEmail').value.trim(); 
-            const pw = document.getElementById('regPassword').value; 
-            const ph = document.getElementById('regPhone').value.trim();
-            
-            if (!fn || !un || !em || !pw || !ph) { alert('Completa todos los campos.'); return; }
-            
-            const res = await window.registerUserInCloud(fn, un, em, pw, ph, '');
-            if (res && res.error) { 
-                alert(res.error); 
-                return; 
-            }
-            
-            if(res && res.id) {
-                localStorage.setItem('bidora_temp_user_id', res.id); 
-                localStorage.setItem('bidora_active_user', un.toLowerCase());
-                closeModal('registerModal'); 
-                verificationStep = 'phone'; 
-                
-                alert("¡Registro exitoso! Te hemos enviado un código de verificación por WhatsApp o SMS.");
-
-                openModal('verifyModal');
-                document.getElementById('timerDisplay').classList.add('hidden');
-                document.getElementById('resendBtn').classList.remove('hidden');
-            } else { 
-                alert('No se pudo registrar.'); 
-            }
-        }
-
-        async function submitVerificationCode() {
-            const code = document.getElementById('verifyInputCode').value.trim();
-            const userId = localStorage.getItem('bidora_temp_user_id');
-            const isValid = await window.verifyCodeInCloud(userId, verificationStep, code);
-            
-            if (isValid) {
-                if (verificationStep === 'phone') {
-                    localStorage.setItem('bidora_phone_verified', 'true'); 
-                    verificationStep = 'email';
-                    document.getElementById('verifyInputCode').value = ''; 
-                    
-                    alert("¡Teléfono verificado con éxito! Ahora te hemos enviado el código de correo.");
-                    
-                    document.getElementById('timerDisplay').classList.add('hidden');
-                    document.getElementById('resendBtn').classList.remove('hidden');
-                } else {
-                    localStorage.setItem('bidora_email_verified', 'true'); 
-                    closeModal('verifyModal'); 
-                    alert('¡Cuenta 100% verificada automáticamente!'); 
-                    location.reload();
-                }
-            } else { 
-                alert('Código incorrecto. Inténtalo de nuevo.'); 
-            }
-        }
-
-        async function openAdminVerificationPanel(type) {
-            verificationStep = type;
-            const list = document.getElementById('adminVerifList'); 
-            document.getElementById('adminModalTitle').innerHTML = type === 'phone' ? 'Códigos Pendientes (Teléfono)' : 'Códigos Pendientes (Correo)';
-            list.innerHTML = 'Buscando en la nube...'; openModal('adminVerifModal');
-            let pending = await window.getPendingCodesFromCloud(type); list.innerHTML = '';
-            
-            if(pending.length === 0) {
-                list.innerHTML = '<p class="text-center text-gray-400 py-4">No hay códigos pendientes.</p>';
-                return;
-            }
-
-            pending.forEach(i => {
-                const icon = type === 'phone' ? '<i class="fab fa-whatsapp text-green-500 mr-1"></i>' : '<i class="fas fa-envelope text-blue-500 mr-1"></i>';
-                const msgText = type === 'phone' 
-                    ? `¡Hola! Tu código de verificación para Bidora es: ${i.code}. No lo compartas con nadie.`
-                    : `¡Hola! Tu código de verificación de correo para Bidora es: ${i.code}. No lo compartas con nadie.`;
-
-                list.innerHTML += `
-                    <div class="bg-gray-50 p-3 rounded-xl border flex flex-col gap-2 shadow-sm">
-                        <div class="flex justify-between items-center">
-                            <div>
-                                <span class="block">User: <strong class="text-indigo-600">${i.username}</strong></span>
-                                <span class="block text-[11px] text-gray-600 font-semibold">${icon} ${i.contact}</span>
-                            </div>
-                            <div class="flex space-x-1">
-                                <button onclick="markAsVerifiedByAdmin('${i.id}', '${type}')" class="bg-green-500 hover:bg-green-600 text-white px-2.5 py-1 rounded text-[10px] font-bold" title="Aprobar">✔</button>
-                                <button onclick="deleteUserRegistration('${i.id}', '${type}')" class="bg-red-500 hover:bg-red-600 text-white px-2.5 py-1 rounded text-[10px] font-bold" title="Eliminar">✖</button>
-                            </div>
-                        </div>
-                        <div class="flex items-center justify-between bg-white p-2 rounded-lg border">
-                            <span class="font-bold text-gray-900 tracking-widest text-sm">${i.code}</span>
-                            <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow"><i class="fas fa-copy mr-1"></i> Copiar Mensaje</button>
-                        </div>
-                    </div>`;
-            });
-        }
-
-        async function handleRequestRecoveryCode() {
-            const user = document.getElementById('recoveryUsername').value.trim();
-            if(!user) { alert("Escribe tu usuario."); return; }
-            const req = await window.requestPasswordResetCode(user);
-            if(req) {
-                document.getElementById('recoveryStep1').classList.add('hidden');
-                document.getElementById('recoveryStep2').classList.remove('hidden');
-            } else { alert("El usuario no existe."); }
-        }
-
-        async function handleResetPasswordSubmit() {
-            const user = document.getElementById('recoveryUsername').value.trim();
-            const code = document.getElementById('recoveryCodeInput').value.trim();
-            const newPass = document.getElementById('recoveryNewPassword').value.trim();
-            if(!code || !newPass) { alert("Completa los campos."); return; }
-            const res = await window.submitNewPassword(user, code, newPass);
-            if(res.success) {
-                alert("¡Contraseña actualizada!");
-                cancelRecovery(); switchToModal('loginModal');
-            } else { alert(res.msg); }
-        }
-
-        function cancelRecovery() {
-            document.getElementById('recoveryUsername').value = '';
-            document.getElementById('recoveryCodeInput').value = '';
-            document.getElementById('recoveryNewPassword').value = '';
-            document.getElementById('recoveryStep1').classList.remove('hidden');
-            document.getElementById('recoveryStep2').classList.add('hidden');
-        }
-
-        async function openAdminRecoveryPanel() {
-            openModal('adminRecoveryModal');
-            const list = document.getElementById('adminRecoveryList');
-            list.innerHTML = '<p class="text-center text-gray-400">Buscando...</p>';
-            const reqs = await window.getRecoveryRequestsForAdmin();
-            list.innerHTML = '';
-            if(reqs.length === 0) { list.innerHTML = '<p class="text-center text-gray-400">No hay solicitudes.</p>'; return; }
-            reqs.forEach(r => {
-                const msgText = `Tu código de recuperación para Bidora es: ${r.code}`;
-                list.innerHTML += `
-                    <div class="bg-gray-50 p-3 rounded-xl border flex justify-between items-center text-xs">
-                        <div><strong>${r.username}</strong><br><span class="text-indigo-600 font-bold">${r.code}</span></div>
-                        <button onclick="copyAutoMessage('${msgText}')" class="bg-indigo-600 text-white px-3 py-1.5 rounded font-semibold">Copiar</button>
-                    </div>`;
-            });
-        }
-
-        async function openStaffChatModal() {
-            openModal('staffChatModal');
-            const container = document.getElementById('staffChatMessagesContainer');
-            const countBadge = document.getElementById('connectedAdminsBadge');
-            
-            container.innerHTML = '<p class="text-center text-gray-400">Cargando...</p>';
-            const count = await window.getConnectedAdminsCount();
-            countBadge.innerText = `Admins Conectados: ${count}`;
-
-            const msgs = await window.getStaffChatMessages();
-            container.innerHTML = '';
-            if(msgs.length === 0) {
-                container.innerHTML = '<p class="text-center text-gray-400 py-4">No hay mensajes.</p>';
-                return;
-            }
-            msgs.forEach(m => {
-                container.innerHTML += `<div class="bg-white p-2 rounded border"><strong>${m.sender} (${m.role}):</strong> ${m.message}</div>`;
-            });
-        }
-
-        async function handleSendStaffMessage() {
-            const input = document.getElementById('staffMessageInput');
-            if(!input.value.trim()) return;
-            await window.sendStaffChatMessage(input.value.trim());
-            input.value = '';
-            openStaffChatModal();
-        }
-
-        function handleAuctionPublish() {
-            const t = document.getElementById('newAuctionTitle').value;
-            const p = document.getElementById('newAuctionPrice').value;
-            window.saveAuctionToFirebase(t, 'Tecnología', p, '', '', false, '');
-        }
-
-        function logout() { localStorage.clear(); location.reload(); }
-        function openModal(id) { document.getElementById(id).classList.add('block'); document.getElementById(id).classList.remove('hidden'); }
-        function closeModal(id) { document.getElementById(id).classList.remove('block'); document.getElementById(id).classList.add('hidden'); }
-        function switchToModal(targetId) { closeModal('loginModal'); closeModal('registerModal'); closeModal('recoveryModal'); openModal(targetId); }
-        function checkOutsideClose(event, modalId) { if (event.target.classList.contains('modal-backdrop')) { closeModal(modalId); } }
-    </script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
